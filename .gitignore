@@ -27,11 +27,17 @@ migrate_working_dir/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
 /coverage/
+
+# Code generation
+*.g.dart
+*.freezed.dart
+*.mocks.dart
 
 # Symbolication related
 app.*.symbols
