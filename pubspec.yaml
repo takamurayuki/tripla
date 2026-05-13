@@ -1,0 +1,50 @@
+name: tripla
+description: "旅の計画を、もっとかんたんに、もっと楽しく！ — トリ太くんと一緒に旅する旅行計画＆記録アプリ"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # State management
+  flutter_riverpod: ^2.5.1
+
+  # Routing
+  go_router: ^14.2.7
+
+  # Animation
+  rive: ^0.13.20
+
+  # Local DB
+  drift: ^2.20.0
+  drift_flutter: ^0.2.0
+  sqlite3_flutter_libs: ^0.5.24
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
+  # Utility
+  intl: ^0.20.2
+  uuid: ^4.4.2
+  collection: ^1.18.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.13
+  drift_dev: ^2.20.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/trita/face/
+    - assets/trita/body/
+    - assets/trita/parts/
+    - assets/image/
