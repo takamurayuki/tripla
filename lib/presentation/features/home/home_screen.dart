@@ -133,15 +133,7 @@ class _HomeTripList extends StatelessWidget {
         final trip = trips[index];
         return TripCard(
           trip: trip,
-          onTap: () {
-            // 旅程詳細はマイルストーン 1.2 で実装予定。
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${trip.title} の詳細画面は次のマイルストーンで実装予定'),
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          },
+          onTap: () => context.push('/trips/${trip.id}'),
         );
       },
     );

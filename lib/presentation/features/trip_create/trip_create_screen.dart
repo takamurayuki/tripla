@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../providers/current_user_provider.dart';
 import '../../providers/trip_providers.dart';
 import '../../widgets/trita/trita_state.dart';
 import '../../widgets/trita/trita_widget.dart';
@@ -69,7 +70,7 @@ class _TripCreateScreenState extends ConsumerState<TripCreateScreen> {
     setState(() => _saving = true);
     try {
       await ref.read(tripRepositoryProvider).create(
-            ownerId: kLocalOwnerId,
+            ownerId: ref.read(currentUserIdProvider),
             title: _titleController.text.trim(),
             startDate: _dateRange!.start,
             endDate: _dateRange!.end,
@@ -130,7 +131,6 @@ class _TripCreateScreenState extends ConsumerState<TripCreateScreen> {
                 decoration: const InputDecoration(
                   labelText: 'タイトル',
                   hintText: '例: 京都2泊3日',
-                  prefixIcon: Icon(Icons.title_rounded),
                 ),
                 textInputAction: TextInputAction.next,
                 validator: (value) {

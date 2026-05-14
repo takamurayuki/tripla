@@ -1,0 +1,320 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/handle_async_action.dart';
+import '../../../domain/entities/day.dart';
+import '../../../domain/entities/trip.dart';
+import '../../providers/trip_providers.dart';
+import '../../widgets/trita/trita_speech_bubble.dart';
+import '../../widgets/trita/trita_state.dart';
+import '../../widgets/trita/trita_widget.dart';
+import 'widgets/add_checklist_item_dialog.dart';
+import 'widgets/checklist_tab_view.dart';
+import 'widgets/dashboard_tab_view.dart';
+import 'widgets/expense_tab_view.dart';
+import 'widgets/member_tab_view.dart';
+import 'widgets/plan_tab_view.dart';
+import 'widgets/topic_editor_sheet.dart';
+import 'widgets/trip_header_card.dart';
+import 'widgets/trip_title_edit_dialog.dart';
+
+/// S-04 旅程詳細画面。
+///
+/// 構成:
+/// - AppBar (戻る + メニュー)
+/// - TripHeaderCard (常時表示、カウントダウン)
+/// - 上位 TabBar (ダッシュボード / 予定 / 持ち物 / 費用 / メンバー)
+/// - TabBarView (各タブ)
+/// FAB は上位タブインデックスに応じて切り替え。
+class TripDetailScreen extends ConsumerWidget {
+  const TripDetailScreen({super.key, required this.tripId});
+
+  final String tripId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tripAsync = ref.watch(tripByIdProvider(tripId));
+    return tripAsync.when(
+      loading: () => Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (e, _) => Scaffold(
+        appBar: AppBar(),
+        body: Center(child: Text('$e')),
+      ),
+      data: (trip) {
+        if (trip == null) return const _TripMissing();
+        return _TripDetailView(trip: trip);
+      },
+    );
+  }
+}
+
+class _TripMissing extends StatelessWidget {
+  const _TripMissing();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const TritaWidget(state: TritaState.thinking, size: 160),
+              const SizedBox(height: 12),
+              const TritaSpeechBubble(message: 'この旅程は見つからなかったよ...'),
+              const SizedBox(height: 24),
+              OutlinedButton(
+                onPressed: () => context.go('/home'),
+                child: const Text('ホームに戻る'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _OuterTab {
+  dashboard('ダッシュボード', Icons.dashboard_rounded),
+  plan('予定', Icons.event_note_rounded),
+  checklist('持ち物', Icons.luggage_rounded),
+  expense('費用', Icons.payments_rounded),
+  member('メンバー', Icons.group_rounded);
+
+  const _OuterTab(this.label, this.icon);
+  final String label;
+  final IconData icon;
+}
+
+class _TripDetailView extends ConsumerStatefulWidget {
+  const _TripDetailView({required this.trip});
+
+  final Trip trip;
+
+  @override
+  ConsumerState<_TripDetailView> createState() => _TripDetailViewState();
+}
+
+class _TripDetailViewState extends ConsumerState<_TripDetailView>
+    with SingleTickerProviderStateMixin {
+  static const _tabs = _OuterTab.values;
+  late final TabController _outerController;
+  final ValueNotifier<Day?> _currentDay = ValueNotifier<Day?>(null);
+
+  /// 初期表示タブは「予定」(画像と同じ)。
+  static const _initialTabIndex = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _outerController = TabController(
+      length: _tabs.length,
+      vsync: this,
+      initialIndex: _initialTabIndex,
+    )..addListener(() {
+        if (!_outerController.indexIsChanging) setState(() {});
+      });
+  }
+
+  @override
+  void dispose() {
+    _outerController.dispose();
+    _currentDay.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onEditTitle() async {
+    final newTitle = await showTripTitleEditDialog(
+      context: context,
+      trip: widget.trip,
+    );
+    if (newTitle == null || newTitle == widget.trip.title) return;
+    if (!mounted) return;
+    await handleAsyncAction(
+      context,
+      () => ref
+          .read(tripRepositoryProvider)
+          .update(widget.trip.copyWith(title: newTitle)),
+      errorMessage: 'タイトルを保存できませんでした',
+    );
+  }
+
+  Future<void> _onDelete() async {
+    final stats = await ref
+        .read(tripRepositoryProvider)
+        .collectStats(widget.trip.id);
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('旅程を削除しますか？'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('「${widget.trip.title}」を削除すると元に戻せないよ。'),
+            const SizedBox(height: 12),
+            Text(
+              '一緒に削除されるもの:\n'
+              '・Day  ${stats.dayCount} 個\n'
+              '・予定 ${stats.topicCount} 件\n'
+              '・持ち物 ${stats.checklistCount} 件',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.coralRed),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('削除する'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
+    final ok = await handleAsyncAction(
+      context,
+      () => ref.read(tripRepositoryProvider).delete(widget.trip.id),
+      errorMessage: '旅程を削除できませんでした',
+    );
+    if (!ok || !mounted) return;
+    context.go('/home');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final trip = widget.trip;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          trip.title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: AppColors.triplaTeal,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        actions: [
+          PopupMenuButton<_MenuAction>(
+            icon: const Icon(Icons.more_horiz),
+            onSelected: (action) {
+              switch (action) {
+                case _MenuAction.editTitle:
+                  _onEditTitle();
+                case _MenuAction.delete:
+                  _onDelete();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _MenuAction.editTitle,
+                child: ListTile(
+                  leading: Icon(Icons.edit_rounded),
+                  title: Text('タイトルを編集'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: _MenuAction.delete,
+                child: ListTile(
+                  leading: Icon(Icons.delete_outline_rounded,
+                      color: AppColors.coralRed),
+                  title: Text('旅程を削除',
+                      style: TextStyle(color: AppColors.coralRed)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          TripHeaderCard(trip: trip),
+          Material(
+            color: AppColors.paperWhite,
+            child: TabBar(
+              controller: _outerController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              indicatorColor: AppColors.triplaTeal,
+              labelColor: AppColors.triplaTeal,
+              unselectedLabelColor: AppColors.softGray,
+              tabs: [
+                for (final t in _tabs)
+                  Tab(icon: Icon(t.icon, size: 18), text: t.label),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _outerController,
+              children: [
+                DashboardTabView(trip: trip),
+                PlanTabView(trip: trip, currentDay: _currentDay),
+                ChecklistTabView(tripId: trip.id),
+                const ExpenseTabView(),
+                const MemberTabView(),
+              ],
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: _buildFab(),
+    );
+  }
+
+  Widget? _buildFab() {
+    final tab = _tabs[_outerController.index];
+    switch (tab) {
+      case _OuterTab.dashboard:
+        return null;
+      case _OuterTab.plan:
+        return ValueListenableBuilder<Day?>(
+          valueListenable: _currentDay,
+          builder: (context, day, _) {
+            if (day == null) return const SizedBox.shrink();
+            return FloatingActionButton.extended(
+              onPressed: () =>
+                  showTopicEditorSheet(context: context, day: day),
+              icon: const Icon(Icons.add),
+              label: const Text('予定を追加'),
+            );
+          },
+        );
+      case _OuterTab.checklist:
+        return FloatingActionButton.extended(
+          onPressed: () => showAddChecklistItemDialog(
+            context: context,
+            tripId: widget.trip.id,
+          ),
+          icon: const Icon(Icons.add),
+          label: const Text('持ち物を追加'),
+        );
+      case _OuterTab.expense:
+        return null;
+      case _OuterTab.member:
+        return null;
+    }
+  }
+}
+
+enum _MenuAction { editTitle, delete }

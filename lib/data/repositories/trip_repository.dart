@@ -23,6 +23,44 @@ class TripRepository {
         );
   }
 
+  /// 指定 ID の旅程を監視する (存在しなければ null を流す)。
+  Stream<Trip?> watchById(String id) {
+    final query = _db.select(_db.trips)..where((t) => t.id.equals(id));
+    return query.watchSingleOrNull().map(
+          (row) => row == null ? null : _toEntity(row),
+        );
+  }
+
+  /// 指定 ID の旅程を 1 回だけ取得する。
+  Future<Trip?> getById(String id) async {
+    final row = await (_db.select(_db.trips)..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    return row == null ? null : _toEntity(row);
+  }
+
+  /// 旅程削除前に表示する関連件数(Day / Topic / 持ち物)を集計する。
+  Future<TripStats> collectStats(String tripId) async {
+    final dayCount = await _db.days.count(where: (d) => d.tripId.equals(tripId)).getSingle();
+    final dayIdsRows = await (_db.selectOnly(_db.days)
+          ..addColumns([_db.days.id])
+          ..where(_db.days.tripId.equals(tripId)))
+        .get();
+    final dayIds = dayIdsRows.map((r) => r.read(_db.days.id)!).toList();
+    final topicCount = dayIds.isEmpty
+        ? 0
+        : await _db.topics
+            .count(where: (t) => t.dayId.isIn(dayIds))
+            .getSingle();
+    final checklistCount = await _db.checklistItems
+        .count(where: (c) => c.tripId.equals(tripId))
+        .getSingle();
+    return TripStats(
+      dayCount: dayCount,
+      topicCount: topicCount,
+      checklistCount: checklistCount,
+    );
+  }
+
   /// 旅程を新規作成して ID を返す。
   Future<String> create({
     required String ownerId,
@@ -79,6 +117,9 @@ class TripRepository {
     await (_db.delete(_db.trips)..where((t) => t.id.equals(id))).go();
   }
 
+  static TripStats emptyStats() =>
+      const TripStats(dayCount: 0, topicCount: 0, checklistCount: 0);
+
   Trip _toEntity(TripRow row) {
     return Trip(
       id: row.id,
@@ -94,4 +135,17 @@ class TripRepository {
       updatedAt: row.updatedAt,
     );
   }
+}
+
+/// 旅程削除前の確認ダイアログ等で使う関連エンティティの件数。
+class TripStats {
+  const TripStats({
+    required this.dayCount,
+    required this.topicCount,
+    required this.checklistCount,
+  });
+
+  final int dayCount;
+  final int topicCount;
+  final int checklistCount;
 }

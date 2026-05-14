@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 /// リポジトリ層でこのドメインモデルに変換する。
 @immutable
 class Trip {
-  const Trip({
+  Trip({
     required this.id,
     required this.ownerId,
     required this.title,
@@ -18,7 +18,9 @@ class Trip {
     this.travelCurrency,
     required this.createdAt,
     required this.updatedAt,
-  });
+  })  : assert(title.trim().isNotEmpty, 'title must not be empty'),
+        assert(!startDate.isAfter(endDate),
+            'startDate ($startDate) must be on or before endDate ($endDate)');
 
   final String id;
   final String ownerId;

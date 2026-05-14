@@ -114,18 +114,45 @@ lib/
 - [x] ホーム画面の空状態 / 一覧切替 (`TripCard`)
 - [x] 旅程作成画面 `/trips/new` (タイトル / 期間 / メモ)
 
-### Phase 1 マイルストーン 1.2 — 旅程詳細 + Day タイムライン (次)
+### Phase 1 マイルストーン 1.2 — 旅程詳細 + Day タイムライン ✅ 完了
 
-1. `Days` / `Topics` テーブル追加 + スキーマバージョン 2 へ migration
-2. 旅程詳細画面 S-04 (Day タブ切替)
-3. Day タイムライン表示
-4. 旅程編集・削除 (長押しメニュー)
+- [x] `Days` / `Topics` テーブル追加 + schemaVersion 2 migration
+- [x] `Day` / `Topic` ドメインエンティティ
+- [x] `DayRepository.ensureDaysForTrip` (idempotent な Day 生成)
+- [x] `TopicRepository` (create / update / delete / watchByDay)
+- [x] `dayListProvider` / `topicListProvider` / `tripByIdProvider`
+- [x] 旅程詳細画面 S-04 (Day タブ + タイムライン)
+- [x] DayTimeline + TopicTile (カテゴリ色 + 時刻バッジ + メモ + 費用)
+- [x] AddTopicBottomSheet (簡易追加: カテゴリ / タイトル / 開始時刻)
+- [x] タイトル編集ダイアログ + 削除確認ダイアログ (AppBar PopupMenu)
+- [x] `/trips/:tripId` ルート + Home カードタップで遷移
 
-### Phase 1 マイルストーン 1.3 — トピック編集 + D&D
+### Phase 1 マイルストーン 1.2+ — 2 段タブ + 持ち物 ✅ 完了
 
-1. トピック編集 S-05 (概要 / コンテンツタブ)
-2. オートセーブ (debounce 500ms)
-3. ドラッグ&ドロップ並べ替え
+旅程詳細画面を 2 段タブ構造に再構築:
+- 上位タブ「計画 / 持ち物 / 費用」(`TripDetailScreen` 自身が外側 TabController を保持)
+- 計画タブ内に下位タブ Day1, Day2... (`PlanTabView` が内側 TabController + `currentDay` ValueNotifier で親に伝達)
+- FAB は上位タブインデックスで動的に切り替え:
+  - 計画 → 「予定を追加」(現在の Day に対して)
+  - 持ち物 → 「持ち物を追加」
+  - 費用 → なし
+- 持ち物機能 (要件 §F-010 の最小実装):
+  - `ChecklistItems` テーブル + schemaVersion 3 migration
+  - `ChecklistRepository` (watchByTrip / create / toggleChecked / delete)
+  - `checklistItemsProvider` (family Stream)
+  - 進捗バー + 未チェック/チェック済 ソート + Dismissible 削除
+- 費用タブ は Phase 2 で本格実装(現在は Trita thinking のプレースホルダ)
+
+### Phase 1 マイルストーン 1.3 — トピック編集 + D&D ✅ 完了
+
+- [x] トピック編集画面 S-05 (`/trips/:tripId/topics/:topicId`) — 概要 / コンテンツ 2 タブ
+- [x] オートセーブ (500ms debounce、保存ボタンなし)。AppBar に保存状態インジケータ
+- [x] DayTimeline を `ReorderableListView` 化 (D&D で `orderIndex` 再採番、トランザクション内)
+- [x] 親予定/子予定の階層表示 (子は親直下にインデント + 矢印アイコン)
+- [x] Tile メニューから「別の予定の子にする」/「親に昇格」 (循環防止: 子孫を親に指定不可)
+- [x] `TopicRepository.reorderForDay` / `setParent` / `watchById` 追加
+- [x] `topicByIdProvider` (StreamProvider.family) 追加
+- [x] Topic 削除時に子の `parentTopicId` を NULL に戻すように修正
 
 ### Phase 1 マイルストーン 1.4 — 認証 (Supabase 接続後)
 

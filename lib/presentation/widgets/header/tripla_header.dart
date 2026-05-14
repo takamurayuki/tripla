@@ -48,7 +48,7 @@ class TriplaHeader extends StatelessWidget implements PreferredSizeWidget {
           ),
         const SizedBox(width: 4),
       ],
-      backgroundColor: AppColors.paleSky,
+      backgroundColor: AppColors.paperWhite,
       surfaceTintColor: Colors.transparent,
     );
   }
