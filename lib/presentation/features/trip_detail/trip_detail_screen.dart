@@ -5,7 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/handle_async_action.dart';
 import '../../../domain/entities/day.dart';
+import '../../../domain/entities/topic.dart';
 import '../../../domain/entities/trip.dart';
+import '../../providers/day_providers.dart';
+import '../../providers/topic_providers.dart';
 import '../../providers/trip_providers.dart';
 import '../../widgets/trita/trita_speech_bubble.dart';
 import '../../widgets/trita/trita_state.dart';
@@ -103,30 +106,15 @@ class _TripDetailView extends ConsumerStatefulWidget {
   ConsumerState<_TripDetailView> createState() => _TripDetailViewState();
 }
 
-class _TripDetailViewState extends ConsumerState<_TripDetailView>
-    with SingleTickerProviderStateMixin {
+class _TripDetailViewState extends ConsumerState<_TripDetailView> {
   static const _tabs = _OuterTab.values;
-  late final TabController _outerController;
   final ValueNotifier<Day?> _currentDay = ValueNotifier<Day?>(null);
 
-  /// 初期表示タブは「予定」(画像と同じ)。
-  static const _initialTabIndex = 1;
-
-  @override
-  void initState() {
-    super.initState();
-    _outerController = TabController(
-      length: _tabs.length,
-      vsync: this,
-      initialIndex: _initialTabIndex,
-    )..addListener(() {
-        if (!_outerController.indexIsChanging) setState(() {});
-      });
-  }
+  /// 初期表示タブは「予定」。
+  int _currentTab = 1;
 
   @override
   void dispose() {
-    _outerController.dispose();
     _currentDay.dispose();
     super.dispose();
   }
@@ -211,6 +199,7 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView>
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          _TripLockButton(trip: trip),
           PopupMenuButton<_MenuAction>(
             icon: const Icon(Icons.more_horiz),
             onSelected: (action) {
@@ -249,24 +238,9 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView>
       body: Column(
         children: [
           TripHeaderCard(trip: trip),
-          Material(
-            color: AppColors.paperWhite,
-            child: TabBar(
-              controller: _outerController,
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              indicatorColor: AppColors.triplaTeal,
-              labelColor: AppColors.triplaTeal,
-              unselectedLabelColor: AppColors.softGray,
-              tabs: [
-                for (final t in _tabs)
-                  Tab(icon: Icon(t.icon, size: 18), text: t.label),
-              ],
-            ),
-          ),
           Expanded(
-            child: TabBarView(
-              controller: _outerController,
+            child: IndexedStack(
+              index: _currentTab,
               children: [
                 DashboardTabView(trip: trip),
                 PlanTabView(trip: trip, currentDay: _currentDay),
@@ -278,12 +252,28 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView>
           ),
         ],
       ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentTab,
+        onDestinationSelected: (i) => setState(() => _currentTab = i),
+        backgroundColor: AppColors.paperWhite,
+        indicatorColor: AppColors.triplaTeal.withValues(alpha: 0.18),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        height: 64,
+        destinations: [
+          for (final t in _tabs)
+            NavigationDestination(
+              icon: Icon(t.icon, color: AppColors.softGray),
+              selectedIcon: Icon(t.icon, color: AppColors.triplaTeal),
+              label: t.label,
+            ),
+        ],
+      ),
       floatingActionButton: _buildFab(),
     );
   }
 
   Widget? _buildFab() {
-    final tab = _tabs[_outerController.index];
+    final tab = _tabs[_currentTab];
     switch (tab) {
       case _OuterTab.dashboard:
         return null;
@@ -292,6 +282,10 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView>
           valueListenable: _currentDay,
           builder: (context, day, _) {
             if (day == null) return const SizedBox.shrink();
+            // 実効ロック中は FAB「予定を追加」を出さない
+            if (widget.trip.isLocked || day.isLocked) {
+              return const SizedBox.shrink();
+            }
             return FloatingActionButton.extended(
               onPressed: () =>
                   showTopicEditorSheet(context: context, day: day),
@@ -301,10 +295,22 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView>
           },
         );
       case _OuterTab.checklist:
+        // ダイアログ内でスコープ (旅全体 / Day / 予定) を選べるよう days / topics を渡す。
+        final days = ref.watch(dayListProvider(widget.trip.id)).maybeWhen(
+              data: (d) => d,
+              orElse: () => const <Day>[],
+            );
+        final topics =
+            ref.watch(tripTopicsProvider(widget.trip.id)).maybeWhen(
+                  data: (t) => t,
+                  orElse: () => const <Topic>[],
+                );
         return FloatingActionButton.extended(
           onPressed: () => showAddChecklistItemDialog(
             context: context,
             tripId: widget.trip.id,
+            availableDays: days,
+            availableTopics: topics,
           ),
           icon: const Icon(Icons.add),
           label: const Text('持ち物を追加'),
@@ -318,3 +324,33 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView>
 }
 
 enum _MenuAction { editTitle, delete }
+
+/// 上位 TabBar 右端に置く Trip 一括ロックボタン。
+/// トリ太の盾アイコンで「全体を保護」のメタファー。
+class _TripLockButton extends ConsumerWidget {
+  const _TripLockButton({required this.trip});
+
+  final Trip trip;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final locked = trip.isLocked;
+    return Tooltip(
+      message: locked ? '一括ロックを解除' : '全 Day を一括ロック',
+      child: IconButton(
+        iconSize: 26,
+        icon: Icon(
+          locked ? Icons.shield_rounded : Icons.shield_outlined,
+          color: locked ? AppColors.warmOrange : AppColors.softGray,
+        ),
+        onPressed: () => handleAsyncAction(
+          context,
+          () => ref
+              .read(tripRepositoryProvider)
+              .setLocked(trip.id, !locked),
+          errorMessage: '一括ロックを更新できませんでした',
+        ),
+      ),
+    );
+  }
+}

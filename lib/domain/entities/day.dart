@@ -9,6 +9,7 @@ class Day {
     required this.dayNumber,
     required this.date,
     this.note,
+    this.isLocked = false,
   });
 
   final String id;
@@ -17,13 +18,17 @@ class Day {
   final DateTime date;
   final String? note;
 
-  Day copyWith({String? note}) {
+  /// Day 個別の編集ロック。Trip.isLocked と OR で実効ロック状態が決まる。
+  final bool isLocked;
+
+  Day copyWith({String? note, bool? isLocked}) {
     return Day(
       id: id,
       tripId: tripId,
       dayNumber: dayNumber,
       date: date,
       note: note ?? this.note,
+      isLocked: isLocked ?? this.isLocked,
     );
   }
 }

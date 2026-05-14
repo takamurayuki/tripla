@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../domain/entities/checklist_item.dart';
 import '../../../../domain/entities/topic.dart';
+import '../../../../domain/entities/topic_link.dart';
+import '../../../providers/checklist_providers.dart';
 
 /// タイムライン上の Topic 単体表示。
 ///
@@ -16,12 +21,17 @@ class TopicTile extends StatelessWidget {
   const TopicTile({
     super.key,
     required this.topic,
+    required this.tripId,
     this.onTap,
     this.onLongPress,
     this.showTime = true,
   });
 
   final Topic topic;
+
+  /// この Topic が属する Trip の ID。
+  /// 紐づく持ち物 (`checklistItemsProvider(tripId)` でフィルタ) の表示に使う。
+  final String tripId;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool showTime;
@@ -56,8 +66,10 @@ class TopicTile extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
               child: topic.isTransport
-                  ? _TransportContent(topic: topic, showTime: showTime)
-                  : _PlanContent(topic: topic, showTime: showTime),
+                  ? _TransportContent(
+                      topic: topic, tripId: tripId, showTime: showTime)
+                  : _PlanContent(
+                      topic: topic, tripId: tripId, showTime: showTime),
             ),
           ),
         ),
@@ -78,14 +90,20 @@ class TopicTile extends StatelessWidget {
   }
 }
 
-class _PlanContent extends StatelessWidget {
-  const _PlanContent({required this.topic, this.showTime = true});
+class _PlanContent extends ConsumerWidget {
+  const _PlanContent({
+    required this.topic,
+    required this.tripId,
+    this.showTime = true,
+  });
   final Topic topic;
+  final String tripId;
   final bool showTime;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cat = topic.category;
+    final checklist = _topicChecklist(ref, tripId, topic.id);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -134,6 +152,10 @@ class _PlanContent extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (checklist.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    _ChecklistCountBadge(items: checklist),
+                  ],
                 ],
               ),
               const SizedBox(height: 4),
@@ -169,6 +191,16 @@ class _PlanContent extends StatelessWidget {
                   ],
                 ),
               ],
+              if (topic.links.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final link in topic.links) _LinkChip(link: link),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -177,15 +209,21 @@ class _PlanContent extends StatelessWidget {
   }
 }
 
-class _TransportContent extends StatelessWidget {
-  const _TransportContent({required this.topic, this.showTime = true});
+class _TransportContent extends ConsumerWidget {
+  const _TransportContent({
+    required this.topic,
+    required this.tripId,
+    this.showTime = true,
+  });
   final Topic topic;
+  final String tripId;
   final bool showTime;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final mode = topic.transportMode;
     final modeColor = AppColors.triplaTeal;
+    final checklist = _topicChecklist(ref, tripId, topic.id);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -238,6 +276,10 @@ class _TransportContent extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (checklist.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    _ChecklistCountBadge(items: checklist),
+                  ],
                 ],
               ),
               const SizedBox(height: 6),
@@ -287,10 +329,219 @@ class _TransportContent extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
+              if (topic.links.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final link in topic.links) _LinkChip(link: link),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 指定 Trip の checklistItemsProvider を watch して、Topic に紐づくアイテムだけ返す。
+List<ChecklistItem> _topicChecklist(
+    WidgetRef ref, String tripId, String topicId) {
+  final all = ref
+      .watch(checklistItemsProvider(tripId))
+      .maybeWhen(data: (l) => l, orElse: () => const <ChecklistItem>[]);
+  return all.where((i) => i.topicId == topicId).toList(growable: false);
+}
+
+/// 予定カードのヘッダー行に置く小さな持ち物バッジ。
+///
+/// 「🧳 1/3」 のように進捗だけを示し、詳細閲覧 / チェックは持ち物タブで行う。
+/// リンクチップ (水色系) と区別するため、持ち物色は **緑系 / オレンジ系**。
+/// 全部チェック済み → bandanaGreen (緑 = 準備完了)
+/// 未チェックあり   → warmOrange (オレンジ = 要準備)
+///
+/// ホバー (Web) / 長押し (Mobile) で **持ち物の一覧を Tooltip 表示**。
+/// Tooltip 内は `richMessage` でアイコン (Icons.luggage_rounded) と
+/// 各項目の □ / ☑ チェックボックスアイコンを描画。
+class _ChecklistCountBadge extends StatelessWidget {
+  const _ChecklistCountBadge({required this.items});
+
+  final List<ChecklistItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final done = items.where((i) => i.isChecked).length;
+    final allDone = done == items.length;
+    final color =
+        allDone ? AppColors.bandanaGreen : AppColors.warmOrange;
+    final bg = allDone
+        ? AppColors.bandanaGreen.withValues(alpha: 0.18)
+        : AppColors.warmOrange.withValues(alpha: 0.18);
+    return Tooltip(
+      richMessage: WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 240),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ヘッダー: 持ち物アイコン + 「持ち物一覧 done/total」
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.luggage_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '持ち物一覧  $done/${items.length}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // 各アイテム: □ or ☑ + 名前
+              for (final item in items)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(
+                        item.isChecked
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded,
+                        size: 16,
+                        color: item.isChecked
+                            ? AppColors.bandanaGreen
+                            : Colors.white.withValues(alpha: 0.85),
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          item.name,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white,
+                            decoration: item.isChecked
+                                ? TextDecoration.lineThrough
+                                : null,
+                            decorationColor:
+                                Colors.white.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      preferBelow: false,
+      waitDuration: const Duration(milliseconds: 200),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.darkBrown.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: color.withValues(alpha: 0.4),
+            width: 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.luggage_rounded, size: 12, color: color),
+            const SizedBox(width: 3),
+            Text(
+              '$done/${items.length}',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// リンクのコンパクトチップ。
+///
+/// 複数リンクを Wrap で横並びに置けるよう、最小限の高さ・幅で表示する。
+/// ラベルが設定されていればラベル、なければドメイン名。タップで外部ブラウザを開く。
+class _LinkChip extends StatelessWidget {
+  const _LinkChip({required this.link});
+
+  final TopicLink link;
+
+  String get _label => link.label.isNotEmpty
+      ? link.label
+      : (Uri.tryParse(link.url)?.host ?? link.url);
+
+  Future<void> _open() async {
+    final uri = Uri.tryParse(link.url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.paleSky.withValues(alpha: 0.55),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: _open,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.link_rounded,
+                  size: 12, color: AppColors.triplaTealDark),
+              const SizedBox(width: 4),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 160),
+                child: Text(
+                  _label,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.triplaTealDark,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.open_in_new_rounded,
+                  size: 11, color: AppColors.softGray),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

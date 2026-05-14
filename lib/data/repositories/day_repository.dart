@@ -47,6 +47,13 @@ class DayRepository {
     await _db.batch((batch) => batch.insertAll(_db.days, inserts));
   }
 
+  /// Day 個別ロックを切り替える。
+  Future<void> setLocked(String id, bool value) async {
+    await (_db.update(_db.days)..where((d) => d.id.equals(id))).write(
+      DaysCompanion(isLocked: Value(value)),
+    );
+  }
+
   Day _toEntity(DayRow row) {
     return Day(
       id: row.id,
@@ -54,6 +61,7 @@ class DayRepository {
       dayNumber: row.dayNumber,
       date: row.date,
       note: row.note,
+      isLocked: row.isLocked,
     );
   }
 }

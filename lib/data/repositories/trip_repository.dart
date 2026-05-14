@@ -106,10 +106,21 @@ class TripRepository {
             coverImageUrl: Value(updated.coverImageUrl),
             baseCurrency: Value(updated.baseCurrency),
             travelCurrency: Value(updated.travelCurrency),
+            isLocked: Value(updated.isLocked),
             createdAt: Value(updated.createdAt),
             updatedAt: Value(updated.updatedAt),
           ),
         );
+  }
+
+  /// Trip 一括ロック状態を切り替える。
+  Future<void> setLocked(String id, bool value) async {
+    await (_db.update(_db.trips)..where((t) => t.id.equals(id))).write(
+      TripsCompanion(
+        isLocked: Value(value),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
   }
 
   /// 旅程を ID 指定で削除する。
@@ -131,6 +142,7 @@ class TripRepository {
       coverImageUrl: row.coverImageUrl,
       baseCurrency: row.baseCurrency,
       travelCurrency: row.travelCurrency,
+      isLocked: row.isLocked,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     );

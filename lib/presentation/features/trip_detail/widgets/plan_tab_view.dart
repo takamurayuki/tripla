@@ -48,7 +48,11 @@ class _PlanTabViewState extends ConsumerState<PlanTabView>
         ..addListener(_onTabChanged);
     }
     _days = days;
-    _publishCurrentDay();
+    // build 中に ValueNotifier を変更すると notifyListeners が握りつぶされ、
+    // ValueListenableBuilder (FAB 等) が再描画されない。次フレームで通知する。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _publishCurrentDay();
+    });
   }
 
   void _onTabChanged() {
@@ -105,7 +109,11 @@ class _PlanTabViewState extends ConsumerState<PlanTabView>
                 controller: _controller,
                 children: [
                   for (final d in days)
-                    DayTimeline(day: d, tripId: widget.trip.id),
+                    DayTimeline(
+                      day: d,
+                      tripId: widget.trip.id,
+                      tripLocked: widget.trip.isLocked,
+                    ),
                 ],
               ),
             ),

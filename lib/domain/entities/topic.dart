@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 
 import 'topic_category.dart';
+import 'topic_link.dart';
 import 'transport_mode.dart';
+import 'transport_plan.dart';
 
 /// 要件定義書 §6.1 Topic エンティティ + Location をフラット化 + 移動情報。
 @immutable
@@ -26,6 +28,8 @@ class Topic {
     this.departure,
     this.destination,
     this.transportMode,
+    this.altPlans = const [],
+    this.links = const [],
     required this.createdAt,
     required this.updatedAt,
   })  : assert(title.trim().isNotEmpty, 'title must not be empty'),
@@ -61,6 +65,16 @@ class Topic {
   /// 移動カテゴリ専用フィールド: 移動手段。
   final TransportMode? transportMode;
 
+  /// 移動カテゴリ専用フィールド: 代替プラン (プランB, C ...)。
+  ///
+  /// Topic 本体が「現在採用中のプラン」、altPlans がそれ以外の候補。
+  /// 旅行中の状況に応じて UI から swap (採用) して切り替える。
+  final List<TransportPlan> altPlans;
+
+  /// この予定に紐づくリンク (予約サイト・地図・公式 など)。
+  /// タイムラインカードに OGP プレビューとして表示。
+  final List<TopicLink> links;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -88,6 +102,8 @@ class Topic {
     String? departure,
     String? destination,
     TransportMode? transportMode,
+    List<TransportPlan>? altPlans,
+    List<TopicLink>? links,
     DateTime? updatedAt,
   }) {
     return Topic(
@@ -110,6 +126,8 @@ class Topic {
       departure: departure ?? this.departure,
       destination: destination ?? this.destination,
       transportMode: transportMode ?? this.transportMode,
+      altPlans: altPlans ?? this.altPlans,
+      links: links ?? this.links,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

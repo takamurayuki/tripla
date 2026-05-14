@@ -16,6 +16,7 @@ class Trip {
     this.coverImageUrl,
     this.baseCurrency = 'JPY',
     this.travelCurrency,
+    this.isLocked = false,
     required this.createdAt,
     required this.updatedAt,
   })  : assert(title.trim().isNotEmpty, 'title must not be empty'),
@@ -31,6 +32,11 @@ class Trip {
   final String? coverImageUrl;
   final String baseCurrency;
   final String? travelCurrency;
+
+  /// Trip 全体の編集ロック (一括ロック)。
+  /// true なら配下の全 Day がロック扱いになり、構成編集不可。
+  final bool isLocked;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -48,6 +54,7 @@ class Trip {
     String? coverImageUrl,
     String? baseCurrency,
     String? travelCurrency,
+    bool? isLocked,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -61,6 +68,7 @@ class Trip {
       coverImageUrl: coverImageUrl ?? this.coverImageUrl,
       baseCurrency: baseCurrency ?? this.baseCurrency,
       travelCurrency: travelCurrency ?? this.travelCurrency,
+      isLocked: isLocked ?? this.isLocked,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

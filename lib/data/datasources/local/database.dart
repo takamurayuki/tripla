@@ -20,6 +20,10 @@ class Trips extends Table {
   DateTimeColumn get createdAt => dateTime().named('created_at')();
   DateTimeColumn get updatedAt => dateTime().named('updated_at')();
 
+  /// Trip 全体の編集ロック (一括ロック)。true なら全 Day がロック扱い。
+  BoolColumn get isLocked =>
+      boolean().named('is_locked').withDefault(const Constant(false))();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -33,6 +37,10 @@ class Days extends Table {
   IntColumn get dayNumber => integer().named('day_number')();
   DateTimeColumn get date => dateTime()();
   TextColumn get note => text().nullable()();
+
+  /// Day 個別の編集ロック。Trip.isLocked が true なら強制的にロック扱い。
+  BoolColumn get isLocked =>
+      boolean().named('is_locked').withDefault(const Constant(false))();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
@@ -83,6 +91,12 @@ class Topics extends Table {
   TextColumn get transportMode =>
       text().named('transport_mode').nullable()();
 
+  /// 移動カテゴリ専用: 代替プランの JSON 配列 (TransportPlan)。
+  TextColumn get altPlans => text().named('alt_plans').nullable()();
+
+  /// 紐づくリンク (TopicLink) の JSON 配列。null/空配列の両方を許容。
+  TextColumn get links => text().nullable()();
+
   DateTimeColumn get createdAt => dateTime().named('created_at')();
   DateTimeColumn get updatedAt => dateTime().named('updated_at')();
 
@@ -103,6 +117,20 @@ class ChecklistItems extends Table {
   IntColumn get orderIndex => integer().named('order_index')();
   DateTimeColumn get createdAt => dateTime().named('created_at')();
 
+  /// 紐づく Day。null なら「旅全体」スコープ。
+  /// 関連 Day が消えた場合は NULL に戻して「旅全体」スコープに昇格させる。
+  TextColumn get dayId => text().named('day_id').nullable()();
+
+  /// 紐づく Topic (予定)。null なら予定経由ではない。
+  /// 関連 Topic が消えると cascade で削除される。
+  TextColumn get topicId => text().named('topic_id').nullable()
+      .references(Topics, #id, onDelete: KeyAction.cascade)();
+
+  /// このアイテムの作成者ユーザー ID。
+  /// 削除権限は作成者にのみある (UI 側でチェック)。
+  TextColumn get createdByUserId => text().named('created_by_user_id')
+      .withDefault(const Constant('local-user'))();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -116,10 +144,16 @@ class TriplaDatabase extends _$TriplaDatabase {
   TriplaDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
+        beforeOpen: (details) async {
+          // SQLite はデフォルトで外部キー制約が無効。
+          // cascade 削除 (Topic 削除 → 関連 ChecklistItem 削除など) を効かせるため、
+          // 接続オープン時に常に有効化する。
+          await customStatement('PRAGMA foreign_keys = ON');
+        },
         onCreate: (m) async {
           await m.createAll();
         },
@@ -135,6 +169,37 @@ class TriplaDatabase extends _$TriplaDatabase {
             await m.addColumn(topics, topics.departure);
             await m.addColumn(topics, topics.destination);
             await m.addColumn(topics, topics.transportMode);
+          }
+          if (from < 5) {
+            await m.addColumn(topics, topics.altPlans);
+          }
+          if (from < 6) {
+            await m.addColumn(trips, trips.isLocked);
+            await m.addColumn(days, days.isLocked);
+            // ALTER TABLE で DEFAULT が既存行に当たらないケースに備えた保険。
+            // 'unexpected null value' エラーを防ぐため明示的に 0 (=false) で埋める。
+            await customStatement(
+              'UPDATE trips SET is_locked = 0 WHERE is_locked IS NULL',
+            );
+            await customStatement(
+              'UPDATE days SET is_locked = 0 WHERE is_locked IS NULL',
+            );
+          }
+          if (from < 7) {
+            await m.addColumn(topics, topics.links);
+          }
+          if (from < 8) {
+            await m.addColumn(checklistItems, checklistItems.dayId);
+            await m.addColumn(checklistItems, checklistItems.topicId);
+            await m.addColumn(
+              checklistItems,
+              checklistItems.createdByUserId,
+            );
+            // 既存行は created_by_user_id が NULL になる可能性があるので保険
+            await customStatement(
+              "UPDATE checklist_items SET created_by_user_id = 'local-user' "
+              'WHERE created_by_user_id IS NULL',
+            );
           }
         },
       );

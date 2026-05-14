@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/handle_async_action.dart';
 import '../../../../domain/entities/day.dart';
 import '../../../../domain/entities/topic.dart';
+import '../../../providers/day_providers.dart';
 import '../../../providers/topic_providers.dart';
 import '../../../widgets/trita/trita_speech_bubble.dart';
 import '../../../widgets/trita/trita_state.dart';
@@ -21,22 +22,33 @@ import 'topic_tile.dart';
 /// - 子 Topic (parentTopicId != null) は親の直下にインデント表示。
 ///   現状は子グループ内の並び順は orderIndex を保持し、UI からの D&D 対象外。
 class DayTimeline extends ConsumerWidget {
-  const DayTimeline({super.key, required this.day, required this.tripId});
+  const DayTimeline({
+    super.key,
+    required this.day,
+    required this.tripId,
+    required this.tripLocked,
+  });
 
   final Day day;
   final String tripId;
 
+  /// Trip 一括ロックの状態。実効ロック判定 (`tripLocked || day.isLocked`) に使う。
+  final bool tripLocked;
+
   static final _headerDateFormat = DateFormat('M/d (E)', 'ja');
+
+  bool get _isEffectiveLocked => tripLocked || day.isLocked;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final topicsAsync = ref.watch(topicListProvider(day.id));
+    final locked = _isEffectiveLocked;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          padding: const EdgeInsets.fromLTRB(20, 10, 8, 10),
           color: AppColors.softSkyBlue.withValues(alpha: 0.35),
           child: Row(
             children: [
@@ -53,11 +65,17 @@ class DayTimeline extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              Text(
-                'Day ${day.dayNumber}  •  ${_headerDateFormat.format(day.date)}',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.triplaTealDark,
-                    ),
+              Expanded(
+                child: Text(
+                  'Day ${day.dayNumber}  •  ${_headerDateFormat.format(day.date)}',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: AppColors.triplaTealDark,
+                      ),
+                ),
+              ),
+              _DayLockButton(
+                day: day,
+                tripLocked: tripLocked,
               ),
             ],
           ),
@@ -68,10 +86,54 @@ class DayTimeline extends ConsumerWidget {
             error: (e, _) => Center(child: Text('$e')),
             data: (topics) => topics.isEmpty
                 ? const _DayEmptyState()
-                : _TimelineList(day: day, tripId: tripId, topics: topics),
+                : _TimelineList(
+                    day: day,
+                    tripId: tripId,
+                    topics: topics,
+                    isLocked: locked,
+                  ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Day ヘッダー右端に置く個別ロックボタン。
+/// Trip 一括ロック中は disabled (灰色 + タップ不可)。
+class _DayLockButton extends ConsumerWidget {
+  const _DayLockButton({required this.day, required this.tripLocked});
+
+  final Day day;
+  final bool tripLocked;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dayLocked = day.isLocked;
+    final disabled = tripLocked;
+    final showLocked = tripLocked || dayLocked;
+    final color = disabled
+        ? AppColors.softGray.withValues(alpha: 0.5)
+        : (dayLocked ? AppColors.warmOrange : AppColors.softGray);
+    final icon =
+        showLocked ? Icons.lock_rounded : Icons.lock_open_rounded;
+
+    return Tooltip(
+      message: tripLocked
+          ? '一括ロック中は個別解除できません'
+          : (dayLocked ? 'Day を編集可能にする' : 'この Day をロック'),
+      child: IconButton(
+        icon: Icon(icon, size: 20, color: color),
+        onPressed: disabled
+            ? null
+            : () => handleAsyncAction(
+                  context,
+                  () => ref
+                      .read(dayRepositoryProvider)
+                      .setLocked(day.id, !dayLocked),
+                  errorMessage: 'ロック状態を更新できませんでした',
+                ),
+      ),
     );
   }
 }
@@ -117,11 +179,15 @@ class _TimelineList extends ConsumerWidget {
     required this.day,
     required this.tripId,
     required this.topics,
+    required this.isLocked,
   });
 
   final Day day;
   final String tripId;
   final List<Topic> topics;
+
+  /// 実効ロック (Trip 一括 OR Day 個別)。true なら + / D&D / タップ無効。
+  final bool isLocked;
 
   /// orderIndex 順の Topic 群を、親グループの配列に変換する。
   /// 親が見つからない子は孤児として親扱いにする。
@@ -198,6 +264,7 @@ class _TimelineList extends ConsumerWidget {
                   isFirstGroup: index == 0,
                   // 最後の group の後ろ(Tail の手前)には + を出さない
                   isLastGroup: index == groups.length - 1,
+                  isLocked: isLocked,
                 ),
               );
             },
@@ -220,6 +287,7 @@ class _TopicGroupTile extends ConsumerWidget {
     required this.reorderIndex,
     required this.isFirstGroup,
     required this.isLastGroup,
+    required this.isLocked,
   });
 
   final Day day;
@@ -227,6 +295,9 @@ class _TopicGroupTile extends ConsumerWidget {
   final int reorderIndex;
   final bool isFirstGroup;
   final bool isLastGroup;
+
+  /// 実効ロック。true なら drag handle / + ボタン / カードタップ全部無効。
+  final bool isLocked;
 
   /// 編集はモーダル (TopicEditorSheet) で行う。
   /// 全画面のトピック編集ルート (/trips/:id/topics/:topicId) は使わない。
@@ -244,36 +315,42 @@ class _TopicGroupTile extends ConsumerWidget {
       children: [
         _TimelineEntry(
           topic: parent,
+          tripId: day.tripId,
           isParent: true,
           // 先頭グループの親は上端
           isTimelineTop: isFirstGroup,
           // 末尾グループ かつ 子なし のとき親が最後の足跡
           isTimelineBottom: isLastGroup && children.isEmpty,
-          onTap: () => _openEdit(context, parent),
-          leading: ReorderableDragStartListener(
-            index: reorderIndex,
-            child: const Icon(
-              Icons.drag_indicator_rounded,
-              color: AppColors.softGray,
-              size: 18,
-            ),
-          ),
+          // ロック中はカードタップ無効
+          onTap: isLocked ? null : () => _openEdit(context, parent),
+          // ロック中は drag handle 非表示
+          leading: isLocked
+              ? null
+              : ReorderableDragStartListener(
+                  index: reorderIndex,
+                  child: const Icon(
+                    Icons.drag_indicator_rounded,
+                    color: AppColors.softGray,
+                    size: 18,
+                  ),
+                ),
           trailing: _DurationBadge(topic: parent),
         ),
         for (var i = 0; i < children.length; i++)
           _TimelineEntry(
             topic: children[i],
+            tripId: day.tripId,
             isParent: false,
             // 子は親の下にあるので上端には来ない
             isTimelineTop: false,
             // 末尾グループの最後の子のみ下端
             isTimelineBottom: isLastGroup && i == lastChildIndex,
-            onTap: () => _openEdit(context, children[i]),
+            onTap: isLocked ? null : () => _openEdit(context, children[i]),
             trailing: _DurationBadge(topic: children[i]),
           ),
         // この group の直後 (次の group との間) に + を出す。
-        // ただし最後の group のあとには出さない (タイムラインの末尾は Tail に任せる)。
-        if (!isLastGroup)
+        // ただし最後の group のあとには出さない / ロック中も出さない。
+        if (!isLastGroup && !isLocked)
           _AddBetweenButton(day: day, afterTopicId: parent.id),
       ],
     );
@@ -340,6 +417,7 @@ class _DurationBadge extends StatelessWidget {
 class _TimelineEntry extends StatelessWidget {
   const _TimelineEntry({
     required this.topic,
+    required this.tripId,
     required this.onTap,
     required this.isParent,
     this.isTimelineTop = false,
@@ -349,7 +427,10 @@ class _TimelineEntry extends StatelessWidget {
   });
 
   final Topic topic;
-  final VoidCallback onTap;
+  final String tripId;
+
+  /// null ならタップ無効 (ロック中)。
+  final VoidCallback? onTap;
   final bool isParent;
   final bool isTimelineTop;
   final bool isTimelineBottom;
@@ -387,7 +468,12 @@ class _TimelineEntry extends StatelessWidget {
               ),
               child: Stack(
                 children: [
-                  TopicTile(topic: topic, onTap: onTap, showTime: false),
+                  TopicTile(
+                    topic: topic,
+                    tripId: tripId,
+                    onTap: onTap,
+                    showTime: false,
+                  ),
                   if (trailing != null)
                     Positioned(top: 4, right: 4, child: trailing!),
                 ],

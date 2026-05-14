@@ -1,9 +1,13 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../domain/entities/topic.dart';
 import '../../domain/entities/topic_category.dart';
+import '../../domain/entities/topic_link.dart';
 import '../../domain/entities/transport_mode.dart';
+import '../../domain/entities/transport_plan.dart';
 import '../datasources/local/database.dart';
 
 class TopicRepository {
@@ -52,6 +56,8 @@ class TopicRepository {
     String? departure,
     String? destination,
     TransportMode? transportMode,
+    List<TransportPlan> altPlans = const [],
+    List<TopicLink> links = const [],
   }) async {
     final maxOrder = await _maxOrderIndex(dayId, parentTopicId: parentTopicId);
     final now = DateTime.now();
@@ -70,6 +76,8 @@ class TopicRepository {
             departure: Value(departure),
             destination: Value(destination),
             transportMode: Value(transportMode?.name),
+            altPlans: Value(_encodePlans(altPlans)),
+            links: Value(_encodeLinks(links)),
             createdAt: now,
             updatedAt: now,
           ),
@@ -173,6 +181,8 @@ class TopicRepository {
       departure: row.departure,
       destination: row.destination,
       transportMode: _parseTransport(row.transportMode),
+      altPlans: _decodePlans(row.altPlans),
+      links: _decodeLinks(row.links),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     );
@@ -199,9 +209,45 @@ class TopicRepository {
       departure: Value(t.departure),
       destination: Value(t.destination),
       transportMode: Value(t.transportMode?.name),
+      altPlans: Value(_encodePlans(t.altPlans)),
+      links: Value(_encodeLinks(t.links)),
       createdAt: Value(t.createdAt),
       updatedAt: Value(t.updatedAt),
     );
+  }
+
+  String? _encodePlans(List<TransportPlan> plans) {
+    if (plans.isEmpty) return null;
+    return jsonEncode(plans.map((p) => p.toJson()).toList());
+  }
+
+  List<TransportPlan> _decodePlans(String? raw) {
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return list
+          .map((e) => TransportPlan.fromJson(e as Map<String, dynamic>))
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  String? _encodeLinks(List<TopicLink> links) {
+    if (links.isEmpty) return null;
+    return jsonEncode(links.map((l) => l.toJson()).toList());
+  }
+
+  List<TopicLink> _decodeLinks(String? raw) {
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return list
+          .map((e) => TopicLink.fromJson(e as Map<String, dynamic>))
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
   }
 
   TopicCategory _parseCategory(String name) {

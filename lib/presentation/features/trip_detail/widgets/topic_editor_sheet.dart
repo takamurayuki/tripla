@@ -1,13 +1,15 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/handle_async_action.dart';
 import '../../../../domain/entities/day.dart';
 import '../../../../domain/entities/topic.dart';
 import '../../../../domain/entities/topic_category.dart';
+import '../../../../domain/entities/topic_link.dart';
 import '../../../../domain/entities/transport_mode.dart';
+import '../../../../domain/entities/transport_plan.dart';
 import '../../../providers/topic_providers.dart';
 
 /// 予定の新規追加 / 編集 BottomSheet。
@@ -75,6 +77,15 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
   TransportMode _transportMode = TransportMode.train;
   bool _saving = false;
 
+  /// 編集中の代替プラン (移動モード専用)。
+  /// 「採用」ボタンでフォームの値とスワップする。
+  List<TransportPlan> _altPlans = [];
+
+  /// 編集中のリンク。保存ボタンで Topic に反映される。
+  List<TopicLink> _links = [];
+
+  final _uuid = const Uuid();
+
   bool get _isEditing => widget.existing != null;
 
   @override
@@ -96,7 +107,93 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
       _descriptionController.text = ex.description ?? '';
       _startController.text = _formatTime(ex.startTime);
       _endController.text = _formatTime(ex.endTime);
+      _altPlans = List<TransportPlan>.from(ex.altPlans);
+      _links = List<TopicLink>.from(ex.links);
     }
+  }
+
+  /// 現在のフォーム値から TransportPlan を構築 (採用案以外を保存するときに使う)。
+  TransportPlan _planFromForm({String? id, String? label}) {
+    final dep = _departureController.text.trim();
+    final dest = _destinationController.text.trim();
+    final note = _descriptionController.text.trim();
+    return TransportPlan(
+      id: id ?? _uuid.v4(),
+      label: label,
+      departure: dep.isEmpty ? null : dep,
+      destination: dest.isEmpty ? null : dest,
+      transportMode: _transportMode,
+      startTime: _parseTime(_startController.text) == null
+          ? null
+          : _toDateTime(_parseTime(_startController.text)!),
+      endTime: _parseTime(_endController.text) == null
+          ? null
+          : _toDateTime(_parseTime(_endController.text)!),
+      note: note.isEmpty ? null : note,
+    );
+  }
+
+  /// altPlans の現在の状態を DB に即時反映する。
+  /// 既存 Topic 編集時のみ動作 (新規作成時はまだ Topic 自体がないので「保存」ボタンを待つ)。
+  Future<void> _persistAltPlans() async {
+    if (!_isEditing) return;
+    final ex = widget.existing!;
+    await handleAsyncAction(
+      context,
+      () => ref.read(topicRepositoryProvider).update(
+            ex.copyWith(altPlans: _altPlans),
+          ),
+      errorMessage: '代替プランの保存に失敗しました',
+    );
+  }
+
+  /// 「現在の入力を代替プランに保存」 — フォームの値を新規プランとして altPlans に積み、
+  /// 既存 Topic ならその場で DB にも反映する (保存忘れで消えないように)。
+  Future<void> _saveCurrentAsAltPlan() async {
+    setState(() {
+      _altPlans = [..._altPlans, _planFromForm()];
+    });
+    await _persistAltPlans();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_isEditing
+            ? '代替プランに追加しました'
+            : '代替プランに追加しました (保存時に確定)'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  /// 「このプランを採用」 — index のプランをフォームに展開し、
+  /// 元のフォーム値を新規プランとして altPlans の同じ位置に挿入する (スワップ)。
+  /// altPlans の変更は即 DB 反映する。
+  Future<void> _adoptPlan(int index) async {
+    final picked = _altPlans[index];
+    final swappedOut = _planFromForm();
+    setState(() {
+      // フォームに採用プランの値を展開
+      _departureController.text = picked.departure ?? '';
+      _destinationController.text = picked.destination ?? '';
+      _descriptionController.text = picked.note ?? '';
+      _startController.text = _formatTime(picked.startTime);
+      _endController.text = _formatTime(picked.endTime);
+      if (picked.transportMode != null) {
+        _transportMode = picked.transportMode!;
+      }
+      // altPlans から採用プランを取り除き、スワップ元を同じ位置に挿入
+      final next = [..._altPlans];
+      next[index] = swappedOut;
+      _altPlans = next;
+    });
+    await _persistAltPlans();
+  }
+
+  Future<void> _removePlan(int index) async {
+    setState(() {
+      _altPlans = [..._altPlans]..removeAt(index);
+    });
+    await _persistAltPlans();
   }
 
   @override
@@ -128,12 +225,6 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
     return TimeOfDay(hour: h, minute: m);
   }
 
-  String? _validateTime(String? value) {
-    if (value == null || value.trim().isEmpty) return null;
-    if (_parseTime(value) == null) return 'HH:MM (00:00〜23:59)';
-    return null;
-  }
-
   DateTime _toDateTime(TimeOfDay t) {
     final d = widget.day.date;
     return DateTime(d.year, d.month, d.day, t.hour, t.minute);
@@ -141,21 +232,13 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
 
   Future<void> _onSave() async {
     if (!_formKey.currentState!.validate()) return;
-    final startT = _parseTime(_startController.text);
-    final endT = _parseTime(_endController.text);
-
-    if (startT != null && endT != null) {
-      final s = startT.hour * 60 + startT.minute;
-      final e = endT.hour * 60 + endT.minute;
-      if (e < s) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('終了時刻は開始時刻より後にしてね')),
-        );
-        return;
-      }
-    }
-
     final isTransport = _mode == _Mode.transport;
+    final startT = _parseTime(_startController.text.trim());
+    final endT = _parseTime(_endController.text.trim());
+    // validate() を通った時点で必須・形式・範囲チェックは済んでいるが、
+    // null 安全のため再確認 (理論上ここに来るとき null は来ない)。
+    if (startT == null || endT == null) return;
+
     final category =
         isTransport ? TopicCategory.transport : _planCategory;
     final title = isTransport
@@ -171,17 +254,21 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
     setState(() => _saving = true);
     try {
       final repo = ref.read(topicRepositoryProvider);
+      // 予定モードでは altPlans は意味を持たないので空にする。
+      final plansToSave = isTransport ? _altPlans : const <TransportPlan>[];
       if (_isEditing) {
         final updated = widget.existing!.copyWith(
           category: category,
           title: title,
           description: description.isEmpty ? null : description,
-          startTime: startT == null ? null : _toDateTime(startT),
-          endTime: endT == null ? null : _toDateTime(endT),
+          startTime: _toDateTime(startT),
+          endTime: _toDateTime(endT),
           departure: departure == null || departure.isEmpty ? null : departure,
           destination:
               destination == null || destination.isEmpty ? null : destination,
           transportMode: transport,
+          altPlans: plansToSave,
+          links: _links,
         );
         await repo.update(updated);
       } else {
@@ -190,12 +277,14 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
           category: category,
           title: title,
           description: description.isEmpty ? null : description,
-          startTime: startT == null ? null : _toDateTime(startT),
-          endTime: endT == null ? null : _toDateTime(endT),
+          startTime: _toDateTime(startT),
+          endTime: _toDateTime(endT),
           departure: departure == null || departure.isEmpty ? null : departure,
           destination:
               destination == null || destination.isEmpty ? null : destination,
           transportMode: transport,
+          altPlans: plansToSave,
+          links: _links,
         );
         // insertAfterTopicId が指定されていれば parent の orderIndex を再振りして
         // 指定位置に挿入する。
@@ -240,6 +329,78 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
     if (d.isNotEmpty) return d;
     if (a.isNotEmpty) return a;
     return _transportMode.label;
+  }
+
+  Future<TopicLink?> _showLinkDialog({
+    required BuildContext context,
+    TopicLink? existing,
+  }) async {
+    final labelController =
+        TextEditingController(text: existing?.label ?? '');
+    final urlController = TextEditingController(text: existing?.url ?? '');
+    final formKey = GlobalKey<FormState>();
+    final result = await showDialog<TopicLink>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(existing == null ? 'リンクを追加' : 'リンクを編集'),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: labelController,
+                  decoration: const InputDecoration(
+                    labelText: 'ラベル (任意)',
+                    hintText: '例: 予約サイト',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: urlController,
+                  autofocus: existing == null,
+                  decoration: const InputDecoration(
+                    labelText: 'URL',
+                    hintText: 'https://...',
+                  ),
+                  keyboardType: TextInputType.url,
+                  validator: (value) {
+                    final text = (value ?? '').trim();
+                    if (text.isEmpty) return 'URL を入力してください';
+                    final uri = Uri.tryParse(text);
+                    if (uri == null ||
+                        !uri.hasScheme ||
+                        !(uri.scheme == 'http' || uri.scheme == 'https')) {
+                      return 'http(s) で始まる URL を入力してください';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('キャンセル'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (!formKey.currentState!.validate()) return;
+                Navigator.of(dialogContext).pop(TopicLink(
+                  id: existing?.id ?? _uuid.v4(),
+                  label: labelController.text.trim(),
+                  url: urlController.text.trim(),
+                ));
+              },
+              child: Text(existing == null ? '追加' : '保存'),
+            ),
+          ],
+        );
+      },
+    );
+    return result;
   }
 
   Future<void> _onDelete() async {
@@ -310,43 +471,12 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
             if (_mode == _Mode.plan) ..._buildPlanFields(context),
 
             const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _startController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [_TimeTextInputFormatter()],
-                    decoration: const InputDecoration(
-                      labelText: '出発',
-                      hintText: 'HH:MM',
-                      prefixIcon: Icon(Icons.schedule_rounded),
-                    ),
-                    validator: _validateTime,
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-                  child: Text('〜',
-                      style: TextStyle(
-                        fontSize: 18,
-                        color: AppColors.softGray,
-                      )),
-                ),
-                Expanded(
-                  child: TextFormField(
-                    controller: _endController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [_TimeTextInputFormatter()],
-                    decoration: const InputDecoration(
-                      labelText: '到着',
-                      hintText: 'HH:MM',
-                    ),
-                    validator: _validateTime,
-                  ),
-                ),
-              ],
+            _TimeRangeRow(
+              startController: _startController,
+              endController: _endController,
+              startLabel: _mode == _Mode.transport ? '出発' : '開始',
+              endLabel: _mode == _Mode.transport ? '到着' : '終了',
+              parseTime: _parseTime,
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -357,6 +487,44 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
               ),
               maxLines: 2,
             ),
+            const SizedBox(height: 16),
+            _LinksSection(
+              links: _links,
+              onAdd: () async {
+                final added = await _showLinkDialog(context: context);
+                if (added != null) {
+                  setState(() => _links = [..._links, added]);
+                }
+              },
+              onEdit: (index) async {
+                final updated = await _showLinkDialog(
+                  context: context,
+                  existing: _links[index],
+                );
+                if (updated != null) {
+                  setState(() {
+                    final next = [..._links];
+                    next[index] = updated;
+                    _links = next;
+                  });
+                }
+              },
+              onRemove: (index) {
+                setState(() {
+                  _links = [..._links]..removeAt(index);
+                });
+              },
+            ),
+            // 代替プランセクション (移動モード専用)
+            if (_mode == _Mode.transport) ...[
+              const SizedBox(height: 16),
+              _AltPlanSection(
+                plans: _altPlans,
+                onSaveCurrent: _saveCurrentAsAltPlan,
+                onAdopt: _adoptPlan,
+                onRemove: _removePlan,
+              ),
+            ],
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: _saving ? null : _onSave,
@@ -531,24 +699,712 @@ class _ModeSegment extends StatelessWidget {
   }
 }
 
-/// 数字 4 桁の入力を `HH:MM` の形に整える InputFormatter。
-class _TimeTextInputFormatter extends TextInputFormatter {
+/// 移動モードの代替プラン一覧 + 「現在の入力を代替プランに保存」ボタン。
+///
+/// - 「現在の入力を代替プランに保存」: フォームの内容をスナップショットとして altPlans に追加
+/// - 行タップ「採用」: そのプランをフォームに展開し、元のフォーム値を altPlans に保持 (スワップ)
+/// - 行右の × : altPlans から削除
+class _AltPlanSection extends StatelessWidget {
+  const _AltPlanSection({
+    required this.plans,
+    required this.onSaveCurrent,
+    required this.onAdopt,
+    required this.onRemove,
+  });
+
+  final List<TransportPlan> plans;
+  final VoidCallback onSaveCurrent;
+  final ValueChanged<int> onAdopt;
+  final ValueChanged<int> onRemove;
+
   @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
-    if (digits.isEmpty) {
-      return const TextEditingValue();
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: AppColors.paperBorder),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.alt_route_rounded,
+                  size: 18, color: AppColors.triplaTeal),
+              const SizedBox(width: 6),
+              Text(
+                '代替プラン',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.triplaTealDark,
+                    ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppColors.triplaTeal.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${plans.length}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.triplaTealDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '今の入力を別プランとして残しておけば、当日の状況に合わせて切り替えられるよ。',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 10),
+          if (plans.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'まだ代替プランはありません',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.softGray,
+                    ),
+              ),
+            )
+          else
+            for (var i = 0; i < plans.length; i++)
+              Padding(
+                padding: EdgeInsets.only(bottom: i == plans.length - 1 ? 0 : 8),
+                child: _AltPlanRow(
+                  index: i,
+                  plan: plans[i],
+                  onAdopt: () => onAdopt(i),
+                  onRemove: () => onRemove(i),
+                ),
+              ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: onSaveCurrent,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('現在の入力を代替プランに保存'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AltPlanRow extends StatelessWidget {
+  const _AltPlanRow({
+    required this.index,
+    required this.plan,
+    required this.onAdopt,
+    required this.onRemove,
+  });
+
+  final int index;
+  final TransportPlan plan;
+  final VoidCallback onAdopt;
+  final VoidCallback onRemove;
+
+  String _label() {
+    final base = String.fromCharCode(0x41 + index); // A, B, C ...
+    return plan.label?.isNotEmpty == true ? plan.label! : 'プラン$base';
+  }
+
+  String _summary() {
+    final mode = plan.transportMode?.label;
+    final dep = plan.departure;
+    final dest = plan.destination;
+    final time = _timeRange(plan.startTime, plan.endTime);
+    final parts = <String>[
+      ?mode,
+      if (dep != null && dest != null) '$dep → $dest'
+      else if (dep != null) '$dep 発'
+      else if (dest != null) '$dest 着',
+      if (time.isNotEmpty) time,
+    ];
+    return parts.isEmpty ? '(内容未設定)' : parts.join(' / ');
+  }
+
+  static String _timeRange(DateTime? s, DateTime? e) {
+    String fmt(DateTime t) =>
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    if (s == null && e == null) return '';
+    if (s == null) return '〜${fmt(e!)}';
+    if (e == null) return '${fmt(s)}〜';
+    return '${fmt(s)}〜${fmt(e)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.paleSky.withValues(alpha: 0.4),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onAdopt,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+          child: Row(
+            children: [
+              Icon(
+                plan.transportMode?.icon ?? Icons.alt_route_rounded,
+                size: 18,
+                color: AppColors.triplaTealDark,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _label(),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.triplaTealDark,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _summary(),
+                      style: Theme.of(context).textTheme.bodySmall,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Tooltip(
+                message: 'このプランを採用',
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  color: AppColors.triplaTeal,
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  onPressed: onAdopt,
+                ),
+              ),
+              Tooltip(
+                message: 'このプランを削除',
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  color: AppColors.softGray,
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: onRemove,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 開始/終了の 2 つの時刻フィールドをまとめて配置する Row。
+///
+/// - 必須/形式/「終了 > 開始」チェックを各フィールドの validator に組み込み、
+///   フィールド直下に赤文字エラーを表示
+/// - 開始時刻の変更を listen し、終了側のドロップダウン候補を
+///   「開始時刻より後の時間/分」だけに絞り込んで再描画する
+class _TimeRangeRow extends StatefulWidget {
+  const _TimeRangeRow({
+    required this.startController,
+    required this.endController,
+    required this.startLabel,
+    required this.endLabel,
+    required this.parseTime,
+  });
+
+  final TextEditingController startController;
+  final TextEditingController endController;
+  final String startLabel;
+  final String endLabel;
+  final TimeOfDay? Function(String) parseTime;
+
+  @override
+  State<_TimeRangeRow> createState() => _TimeRangeRowState();
+}
+
+class _TimeRangeRowState extends State<_TimeRangeRow> {
+  @override
+  void initState() {
+    super.initState();
+    widget.startController.addListener(_onStartChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.startController.removeListener(_onStartChanged);
+    super.dispose();
+  }
+
+  void _onStartChanged() {
+    if (mounted) setState(() {}); // 終了側の minTime を再評価するため
+  }
+
+  String? _validateStart(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return '${widget.startLabel}時刻を入力してください';
+    if (widget.parseTime(text) == null) return '00:00〜23:59 で指定してね';
+    return null;
+  }
+
+  String? _validateEnd(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return '${widget.endLabel}時刻を入力してください';
+    final endT = widget.parseTime(text);
+    if (endT == null) return '00:00〜23:59 で指定してね';
+    final startT = widget.parseTime(widget.startController.text.trim());
+    if (startT != null) {
+      final s = startT.hour * 60 + startT.minute;
+      final e = endT.hour * 60 + endT.minute;
+      if (e <= s) return '${widget.startLabel}時刻より後にしてください';
     }
-    final clamped = digits.substring(0, digits.length > 4 ? 4 : digits.length);
-    final formatted = clamped.length <= 2
-        ? clamped
-        : '${clamped.substring(0, 2)}:${clamped.substring(2)}';
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: formatted.length),
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final startT = widget.parseTime(widget.startController.text.trim());
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _TimeInputField(
+            controller: widget.startController,
+            label: widget.startLabel,
+            validator: _validateStart,
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 16),
+          child: Text('〜',
+              style: TextStyle(
+                fontSize: 18,
+                color: AppColors.softGray,
+              )),
+        ),
+        Expanded(
+          child: _TimeInputField(
+            controller: widget.endController,
+            label: widget.endLabel,
+            validator: _validateEnd,
+            minTime: startT,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// プルダウンだけで入力する時刻フィールド。
+///
+/// - 中央に常時 `:` を表示
+/// - HH / MM の値はそれぞれの ▾ ボタンタップで一覧から選ぶ (タイプ入力なし)
+/// - 未選択時はヒント (`HH` / `MM`) を薄く表示
+/// - 親 [controller] には `'HH:MM'` または空文字を反映
+/// - [validator] を受け取り、エラーは入力フィールド直下に赤文字で表示
+/// - [minTime] があれば HH / MM の候補を「これより後」に絞り込む
+class _TimeInputField extends StatefulWidget {
+  const _TimeInputField({
+    required this.controller,
+    required this.label,
+    this.validator,
+    this.minTime,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final FormFieldValidator<String>? validator;
+  final TimeOfDay? minTime;
+
+  @override
+  State<_TimeInputField> createState() => _TimeInputFieldState();
+}
+
+class _TimeInputFieldState extends State<_TimeInputField> {
+  int? _hour;
+  int? _minute;
+  final _fieldKey = GlobalKey<FormFieldState<String>>();
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFromParent();
+    widget.controller.addListener(_syncFromParent);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_syncFromParent);
+    super.dispose();
+  }
+
+  void _syncFromParent() {
+    final text = widget.controller.text.trim();
+    final m = RegExp(r'^(\d{1,2}):(\d{1,2})$').firstMatch(text);
+    int? h;
+    int? mm;
+    if (m != null) {
+      h = int.tryParse(m.group(1)!);
+      mm = int.tryParse(m.group(2)!);
+    }
+    if (_hour != h || _minute != mm) {
+      setState(() {
+        _hour = h;
+        _minute = mm;
+      });
+    }
+  }
+
+  void _syncToParent() {
+    String result;
+    if (_hour == null && _minute == null) {
+      result = '';
+    } else {
+      final hh = (_hour ?? 0).toString().padLeft(2, '0');
+      final mp = (_minute ?? 0).toString().padLeft(2, '0');
+      result = '$hh:$mp';
+    }
+    if (widget.controller.text != result) {
+      widget.controller.text = result;
+    }
+    _fieldKey.currentState?.didChange(result);
+  }
+
+  /// HH ドロップダウンの選択肢。minTime があれば「下限以降の時間」のみ。
+  List<int> _allowedHours() {
+    final min = widget.minTime;
+    if (min == null) return List.generate(24, (i) => i);
+    return [for (var i = min.hour; i < 24; i++) i];
+  }
+
+  /// MM ドロップダウンの選択肢。
+  /// 現在の HH が minTime と同じ時間なら、minTime の分より大きい値だけ許可。
+  List<int> _allowedMinutes() {
+    final min = widget.minTime;
+    if (min == null) return List.generate(60, (i) => i);
+    final h = _hour;
+    if (h == null) return List.generate(60, (i) => i);
+    if (h == min.hour) {
+      return [for (var i = min.minute + 1; i < 60; i++) i];
+    }
+    if (h > min.hour) return List.generate(60, (i) => i);
+    return const [];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FormField<String>(
+      key: _fieldKey,
+      initialValue: widget.controller.text,
+      validator: widget.validator,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      builder: (state) => InputDecorator(
+        decoration: InputDecoration(
+          labelText: widget.label,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          errorText: state.errorText,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _TimePartButton(
+              value: _hour,
+              hint: 'HH',
+              tooltip: '時を選ぶ',
+              values: _allowedHours(),
+              onSelected: (v) {
+                setState(() {
+                  _hour = v;
+                  // 新しい HH に合わせて MM が許可範囲外なら一旦クリア
+                  if (_minute != null && !_allowedMinutes().contains(_minute)) {
+                    _minute = null;
+                  }
+                });
+                _syncToParent();
+              },
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                ':',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.softGray,
+                ),
+              ),
+            ),
+            _TimePartButton(
+              value: _minute,
+              hint: 'MM',
+              tooltip: '分を選ぶ',
+              values: _allowedMinutes(),
+              onSelected: (v) {
+                setState(() => _minute = v);
+                _syncToParent();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// HH / MM 各 1 つ分のプルダウンボタン。
+/// 未選択時はヒント文字 (HH / MM) を薄く表示し、選択するとその値を表示。
+class _TimePartButton extends StatelessWidget {
+  const _TimePartButton({
+    required this.value,
+    required this.hint,
+    required this.tooltip,
+    required this.values,
+    required this.onSelected,
+  });
+
+  final int? value;
+  final String hint;
+  final String tooltip;
+  final List<int> values;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = values.isNotEmpty;
+    final display = value?.toString().padLeft(2, '0') ?? hint;
+    final textColor = value == null
+        ? AppColors.softGray.withValues(alpha: 0.5)
+        : AppColors.darkBrown;
+    return PopupMenuButton<int>(
+      tooltip: tooltip,
+      enabled: enabled,
+      initialValue:
+          (value != null && values.contains(value)) ? value : null,
+      onSelected: onSelected,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 64, maxHeight: 320),
+      itemBuilder: (_) => [
+        for (final i in values)
+          PopupMenuItem<int>(
+            value: i,
+            height: 36,
+            child: Center(
+              child: Text(
+                i.toString().padLeft(2, '0'),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              display,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: textColor,
+              ),
+            ),
+            Icon(
+              Icons.arrow_drop_down_rounded,
+              size: 18,
+              color: enabled
+                  ? AppColors.triplaTeal
+                  : AppColors.softGray.withValues(alpha: 0.4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 予定に紐づくリンク一覧 + 「+ リンクを追加」ボタンのセクション。
+class _LinksSection extends StatelessWidget {
+  const _LinksSection({
+    required this.links,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onRemove,
+  });
+
+  final List<TopicLink> links;
+  final VoidCallback onAdd;
+  final ValueChanged<int> onEdit;
+  final ValueChanged<int> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: AppColors.paperBorder),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.link_rounded,
+                  size: 18, color: AppColors.triplaTeal),
+              const SizedBox(width: 6),
+              Text(
+                'リンク',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.triplaTealDark,
+                    ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppColors.triplaTeal.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${links.length}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.triplaTealDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '予約サイトや地図など、関連する URL を貼り付けておけます。',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 10),
+          if (links.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'まだリンクはありません',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.softGray,
+                    ),
+              ),
+            )
+          else
+            for (var i = 0; i < links.length; i++)
+              Padding(
+                padding: EdgeInsets.only(bottom: i == links.length - 1 ? 0 : 8),
+                child: _LinkEditRow(
+                  link: links[i],
+                  onTap: () => onEdit(i),
+                  onRemove: () => onRemove(i),
+                ),
+              ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_link_rounded),
+            label: const Text('リンクを追加'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LinkEditRow extends StatelessWidget {
+  const _LinkEditRow({
+    required this.link,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  final TopicLink link;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  String get _displayLabel =>
+      link.label.isNotEmpty ? link.label : _domain(link.url);
+
+  static String _domain(String url) {
+    final uri = Uri.tryParse(url);
+    return uri?.host ?? url;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.paleSky.withValues(alpha: 0.4),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          child: Row(
+            children: [
+              const Icon(Icons.link_rounded,
+                  size: 18, color: AppColors.triplaTealDark),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _displayLabel,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.triplaTealDark,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (link.label.isNotEmpty)
+                      Text(
+                        link.url,
+                        style: Theme.of(context).textTheme.bodySmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'このリンクを削除',
+                visualDensity: VisualDensity.compact,
+                iconSize: 18,
+                color: AppColors.softGray,
+                icon: const Icon(Icons.close_rounded),
+                onPressed: onRemove,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -3,6 +3,8 @@ import 'package:tripla/data/repositories/day_repository.dart';
 import 'package:tripla/data/repositories/topic_repository.dart';
 import 'package:tripla/data/repositories/trip_repository.dart';
 import 'package:tripla/domain/entities/topic_category.dart';
+import 'package:tripla/domain/entities/transport_mode.dart';
+import 'package:tripla/domain/entities/transport_plan.dart';
 
 import '../../helpers/test_db.dart';
 
@@ -79,6 +81,52 @@ void main() {
       final p = list.firstWhere((t) => t.id == parent);
       // parent は親のまま
       expect(p.parentTopicId, isNull);
+    });
+
+    test('create + update で altPlans (代替プラン) が永続化される', () async {
+      final id = await topicRepo.create(
+        dayId: dayId,
+        category: TopicCategory.transport,
+        title: '東京 → 池袋',
+        transportMode: TransportMode.taxi,
+        altPlans: [
+          TransportPlan(
+            id: 'p1',
+            label: 'プランA',
+            departure: '東京',
+            destination: '池袋',
+            transportMode: TransportMode.train,
+            startTime: DateTime(2026, 5, 14, 9, 0),
+            endTime: DateTime(2026, 5, 14, 12, 30),
+            note: 'JR 山手線',
+          ),
+        ],
+      );
+
+      final created = (await topicRepo.watchByDay(dayId).first)
+          .firstWhere((t) => t.id == id);
+      expect(created.altPlans, hasLength(1));
+      expect(created.altPlans.first.id, 'p1');
+      expect(created.altPlans.first.label, 'プランA');
+      expect(created.altPlans.first.transportMode, TransportMode.train);
+      expect(created.altPlans.first.startTime, DateTime(2026, 5, 14, 9, 0));
+      expect(created.altPlans.first.note, 'JR 山手線');
+
+      // update でプランを追加
+      await topicRepo.update(created.copyWith(altPlans: [
+        ...created.altPlans,
+        TransportPlan(
+          id: 'p2',
+          label: 'プランB',
+          transportMode: TransportMode.bus,
+          departure: '東京',
+          destination: '池袋',
+        ),
+      ]));
+      final updated = (await topicRepo.watchByDay(dayId).first)
+          .firstWhere((t) => t.id == id);
+      expect(updated.altPlans, hasLength(2));
+      expect(updated.altPlans.map((p) => p.id), ['p1', 'p2']);
     });
 
     test('delete は子の parentTopicId を NULL に戻す', () async {

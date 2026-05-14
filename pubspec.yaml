@@ -34,6 +34,10 @@ dependencies:
   uuid: ^4.4.2
   collection: ^1.18.0
 
+  # Link preview (OGP)
+  any_link_preview: ^3.0.2
+  url_launcher: ^6.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

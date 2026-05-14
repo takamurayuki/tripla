@@ -33,6 +33,22 @@ void main() {
       expect(days[2].date, DateTime(2026, 5, 3));
     });
 
+    test('setLocked で Day.isLocked が永続化される', () async {
+      final id = await tripRepo.create(
+        ownerId: 'u1',
+        title: 't',
+        startDate: DateTime(2026, 5, 1),
+        endDate: DateTime(2026, 5, 1),
+      );
+      final trip = (await tripRepo.getById(id))!;
+      await dayRepo.ensureDaysForTrip(trip);
+      final day = (await dayRepo.watchByTrip(id).first).first;
+      expect(day.isLocked, isFalse);
+      await dayRepo.setLocked(day.id, true);
+      final after = (await dayRepo.watchByTrip(id).first).first;
+      expect(after.isLocked, isTrue);
+    });
+
     test('再呼び出ししても件数が増えない (idempotent)', () async {
       final id = await tripRepo.create(
         ownerId: 'u1',

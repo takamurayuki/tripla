@@ -55,6 +55,20 @@ void main() {
       expect(await repository.getById(id), isNull);
     });
 
+    test('setLocked で isLocked が永続化される', () async {
+      final id = await repository.create(
+        ownerId: 'u1',
+        title: 'lock-test',
+        startDate: DateTime(2026, 1, 1),
+        endDate: DateTime(2026, 1, 1),
+      );
+      expect((await repository.getById(id))!.isLocked, isFalse);
+      await repository.setLocked(id, true);
+      expect((await repository.getById(id))!.isLocked, isTrue);
+      await repository.setLocked(id, false);
+      expect((await repository.getById(id))!.isLocked, isFalse);
+    });
+
     test('collectStats は Day/Topic/Checklist の件数を返す', () async {
       final id = await repository.create(
         ownerId: 'u1',

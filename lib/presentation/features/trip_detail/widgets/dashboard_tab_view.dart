@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -45,11 +47,323 @@ class DashboardTabView extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 16),
+            _CategoryDonutCard(tripId: trip.id),
+            const SizedBox(height: 16),
             _DayBreakdownCard(tripId: trip.id, days: days),
           ],
         );
       },
     );
+  }
+}
+
+/// 旅全体のカテゴリ別所要時間 (合計) を donut chart + 凡例で可視化するカード。
+class _CategoryDonutCard extends ConsumerWidget {
+  const _CategoryDonutCard({required this.tripId});
+
+  final String tripId;
+
+  static String _formatDuration(int minutes) {
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h > 0 && m > 0) return '$h時間$m分';
+    if (h > 0) return '$h時間';
+    return '$m分';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final topicsAsync = ref.watch(tripTopicsProvider(tripId));
+    final all = topicsAsync.maybeWhen(
+      data: (t) => t,
+      orElse: () => const <Topic>[],
+    );
+    // 親トピックだけを集計対象に (子は親に含まれる扱い)
+    final parents = all.where((t) => t.parentTopicId == null).toList();
+    // カテゴリ → 合計分数
+    final byCategory = <TopicCategory, int>{};
+    var unscheduled = 0;
+    for (final t in parents) {
+      final s = t.startTime;
+      final e = t.endTime;
+      if (s == null || e == null) {
+        unscheduled++;
+        continue;
+      }
+      final m = e.difference(s).inMinutes;
+      if (m <= 0) {
+        unscheduled++;
+        continue;
+      }
+      byCategory[t.category] = (byCategory[t.category] ?? 0) + m;
+    }
+    final totalMinutes = byCategory.values.fold<int>(0, (a, b) => a + b);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.pie_chart_rounded,
+                  color: AppColors.triplaTeal, size: 22),
+              const SizedBox(width: 8),
+              Text(
+                '旅の傾向',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'カテゴリ別に「何にどれくらい時間をかけているか」を見える化。',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          if (totalMinutes == 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(
+                unscheduled > 0
+                    ? '時刻が設定された予定がまだありません ($unscheduled 件は時刻未設定)'
+                    : 'まだ予定がありません。予定を追加して時刻を入れると傾向が見られます。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.softGray,
+                    ),
+              ),
+            )
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 130,
+                  height: 130,
+                  child: CustomPaint(
+                    painter: _DonutPainter(
+                      segments: [
+                        for (final entry in byCategory.entries)
+                          _DonutSegment(
+                            value: entry.value,
+                            color: entry.key.color,
+                          ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _formatDuration(totalMinutes),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.triplaTealDark,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            '合計',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: AppColors.softGray,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _CategoryLegendList(
+                    byCategory: byCategory,
+                    totalMinutes: totalMinutes,
+                  ),
+                ),
+              ],
+            ),
+          if (totalMinutes > 0 && unscheduled > 0) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.schedule_rounded,
+                    size: 14, color: AppColors.softGray),
+                const SizedBox(width: 4),
+                Text(
+                  '時刻未設定 $unscheduled 件 (集計には含まれません)',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryLegendList extends StatelessWidget {
+  const _CategoryLegendList({
+    required this.byCategory,
+    required this.totalMinutes,
+  });
+
+  final Map<TopicCategory, int> byCategory;
+  final int totalMinutes;
+
+  static String _formatDuration(int minutes) {
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h > 0 && m > 0) return '${h}h${m}m';
+    if (h > 0) return '${h}h';
+    return '${m}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 時間の多い順
+    final entries = byCategory.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final e in entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: e.key.color,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    e.key.label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.darkBrown,
+                    ),
+                  ),
+                ),
+                Text(
+                  _formatDuration(e.value),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.softGray,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 34,
+                  child: Text(
+                    '${(e.value * 100 / totalMinutes).round()}%',
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.triplaTealDark,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _DonutSegment {
+  const _DonutSegment({required this.value, required this.color});
+  final int value;
+  final Color color;
+}
+
+class _DonutPainter extends CustomPainter {
+  const _DonutPainter({required this.segments});
+
+  final List<_DonutSegment> segments;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final total = segments.fold<int>(0, (a, b) => a + b.value);
+    if (total == 0) return;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final outer = size.shortestSide / 2;
+    final inner = outer * 0.58;
+
+    double startAngle = -math.pi / 2;
+    for (final segment in segments) {
+      final sweep = (segment.value / total) * 2 * math.pi;
+      final fill = Paint()
+        ..color = segment.color
+        ..style = PaintingStyle.fill
+        ..isAntiAlias = true;
+
+      final p = Path()
+        ..moveTo(
+          center.dx + outer * math.cos(startAngle),
+          center.dy + outer * math.sin(startAngle),
+        )
+        ..arcTo(
+          Rect.fromCircle(center: center, radius: outer),
+          startAngle,
+          sweep,
+          false,
+        )
+        ..lineTo(
+          center.dx + inner * math.cos(startAngle + sweep),
+          center.dy + inner * math.sin(startAngle + sweep),
+        )
+        ..arcTo(
+          Rect.fromCircle(center: center, radius: inner),
+          startAngle + sweep,
+          -sweep,
+          false,
+        )
+        ..close();
+
+      canvas.drawPath(p, fill);
+
+      // セグメント境界の細い白線
+      final border = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..isAntiAlias = true;
+      canvas.drawPath(p, border);
+
+      startAngle += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DonutPainter old) {
+    if (old.segments.length != segments.length) return true;
+    for (var i = 0; i < segments.length; i++) {
+      if (old.segments[i].value != segments[i].value ||
+          old.segments[i].color != segments[i].color) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 
