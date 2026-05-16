@@ -479,143 +479,157 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Form(
-      key: _formKey,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.softSkyBlue,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Text(
-              _isEditing ? '予定を編集' : 'Day ${widget.day.dayNumber} に予定を追加',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 16),
-
-            // 予定 / 移動 セグメント
-            _ModeSegment(
-              mode: _mode,
-              onChanged: (m) => setState(() => _mode = m),
-            ),
-            const SizedBox(height: 16),
-
-            if (_mode == _Mode.transport) ..._buildTransportFields(context),
-            if (_mode == _Mode.plan) ..._buildPlanFields(context),
-
-            const SizedBox(height: 12),
-            _TimeRangeRow(
-              startController: _startController,
-              endController: _endController,
-              startLabel: _mode == _Mode.transport ? '出発' : '開始',
-              endLabel: _mode == _Mode.transport ? '到着' : '終了',
-              parseTime: _parseTime,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _descriptionController,
-              decoration: const InputDecoration(
-                labelText: 'メモ (任意)',
-                prefixIcon: Icon(Icons.notes_rounded),
-              ),
-              maxLines: 2,
-            ),
-            const SizedBox(height: 16),
-            _LinksSection(
-              links: _links,
-              onAdd: () async {
-                final added = await _showLinkDialog(context: context);
-                if (added != null) {
-                  setState(() => _links = [..._links, added]);
-                }
-              },
-              onEdit: (index) async {
-                final updated = await _showLinkDialog(
-                  context: context,
-                  existing: _links[index],
-                );
-                if (updated != null) {
-                  setState(() {
-                    final next = [..._links];
-                    next[index] = updated;
-                    _links = next;
-                  });
-                }
-              },
-              onRemove: (index) {
-                setState(() {
-                  _links = [..._links]..removeAt(index);
-                });
-              },
-            ),
-            // 代替プランセクション (移動 / 予定 どちらでも表示)
-            const SizedBox(height: 16),
-            _AltPlanSection(
-              plans: _altPlans,
-              onSaveCurrent: _saveCurrentAsAltPlan,
-              onAdopt: _adoptPlan,
-              onRemove: _removePlan,
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: _saving ? null : _onSave,
-              icon: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.check_rounded),
-              label: Text(_saving ? '保存中...' : '保存'),
-            ),
-            if (_isEditing) ...[
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: _saving ? null : _onDelete,
-                style: ButtonStyle(
-                  foregroundColor:
-                      const WidgetStatePropertyAll(AppColors.coralRed),
-                  // ホバー / フォーカス / 押下 で薄い赤背景を表示
-                  overlayColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.pressed)) {
-                      return AppColors.coralRed.withValues(alpha: 0.16);
-                    }
-                    if (states.contains(WidgetState.hovered) ||
-                        states.contains(WidgetState.focused)) {
-                      return AppColors.coralRed.withValues(alpha: 0.10);
-                    }
-                    return null;
-                  }),
-                  shape: WidgetStatePropertyAll(
-                    RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+    // Stack で本文 + 左上に固定の × ボタンを重ねる。
+    // 本文をスクロールしても × は固定位置で見え続ける。
+    return Stack(
+      children: [
+        Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            // 左上の × ボタンと被らないよう top を 56 に。
+            padding: const EdgeInsets.fromLTRB(20, 56, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.softSkyBlue,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  padding: const WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  ),
                 ),
-                icon: const Icon(Icons.delete_outline_rounded),
-                label: const Text('この予定を削除'),
-              ),
-            ],
-          ],
+                // 予定 / 移動 セグメント
+                _ModeSegment(
+                  mode: _mode,
+                  onChanged: (m) => setState(() => _mode = m),
+                ),
+                const SizedBox(height: 16),
+                if (_mode == _Mode.transport)
+                  ..._buildTransportFields(context),
+                if (_mode == _Mode.plan) ..._buildPlanFields(context),
+                const SizedBox(height: 12),
+                _TimeRangeRow(
+                  startController: _startController,
+                  endController: _endController,
+                  startLabel: _mode == _Mode.transport ? '出発' : '開始',
+                  endLabel: _mode == _Mode.transport ? '到着' : '終了',
+                  parseTime: _parseTime,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _descriptionController,
+                  decoration: const InputDecoration(
+                    labelText: 'メモ (任意)',
+                    prefixIcon: Icon(Icons.notes_rounded),
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 16),
+                _LinksSection(
+                  links: _links,
+                  onAdd: () async {
+                    final added = await _showLinkDialog(context: context);
+                    if (added != null) {
+                      setState(() => _links = [..._links, added]);
+                    }
+                  },
+                  onEdit: (index) async {
+                    final updated = await _showLinkDialog(
+                      context: context,
+                      existing: _links[index],
+                    );
+                    if (updated != null) {
+                      setState(() {
+                        final next = [..._links];
+                        next[index] = updated;
+                        _links = next;
+                      });
+                    }
+                  },
+                  onRemove: (index) {
+                    setState(() {
+                      _links = [..._links]..removeAt(index);
+                    });
+                  },
+                ),
+                // 代替プランセクション (移動 / 予定 どちらでも表示)
+                const SizedBox(height: 16),
+                _AltPlanSection(
+                  plans: _altPlans,
+                  onSaveCurrent: _saveCurrentAsAltPlan,
+                  onAdopt: _adoptPlan,
+                  onRemove: _removePlan,
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: _saving ? null : _onSave,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check_rounded),
+                  label: Text(_saving ? '保存中...' : '保存'),
+                ),
+                if (_isEditing) ...[
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: _saving ? null : _onDelete,
+                    style: ButtonStyle(
+                      foregroundColor:
+                          const WidgetStatePropertyAll(AppColors.coralRed),
+                      // ホバー / フォーカス / 押下 で薄い赤背景を表示
+                      overlayColor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.pressed)) {
+                          return AppColors.coralRed.withValues(alpha: 0.16);
+                        }
+                        if (states.contains(WidgetState.hovered) ||
+                            states.contains(WidgetState.focused)) {
+                          return AppColors.coralRed.withValues(alpha: 0.10);
+                        }
+                        return null;
+                      }),
+                      shape: WidgetStatePropertyAll(
+                        RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      padding: const WidgetStatePropertyAll(
+                        EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    label: const Text('この予定を削除'),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
-      ),
+        // 左上に固定の × 閉じるボタン。 スクロールしても常に同じ位置に居続ける。
+        Positioned(
+          top: 4,
+          left: 4,
+          child: Material(
+            color: Colors.transparent,
+            child: IconButton(
+              tooltip: '閉じる',
+              icon: const Icon(Icons.close_rounded),
+              color: AppColors.softGray,
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
