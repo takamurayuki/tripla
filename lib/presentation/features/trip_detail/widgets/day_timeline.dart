@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/handle_async_action.dart';
 import '../../../../domain/entities/day.dart';
 import '../../../../domain/entities/topic.dart';
+import '../../../../domain/entities/trip_mode.dart';
 import '../../../providers/day_providers.dart';
 import '../../../providers/topic_providers.dart';
 import '../../../widgets/trita/trita_speech_bubble.dart';
@@ -27,6 +28,8 @@ class DayTimeline extends ConsumerWidget {
     required this.day,
     required this.tripId,
     required this.tripLocked,
+    this.showDayHeader = true,
+    this.tripMode = TripMode.plan,
   });
 
   final Day day;
@@ -34,6 +37,13 @@ class DayTimeline extends ConsumerWidget {
 
   /// Trip 一括ロックの状態。実効ロック判定 (`tripLocked || day.isLocked`) に使う。
   final bool tripLocked;
+
+  /// 「Day N • M/d (E)」 ヘッダーの表示有無。
+  /// スケジュールモード (mode=schedule) では Day 番号が意味を持たないため false にする。
+  final bool showDayHeader;
+
+  /// schedule モードでは TopicTile の category 表示を差し替える + 追加シートも mode を渡す。
+  final TripMode tripMode;
 
   static final _headerDateFormat = DateFormat('M/d (E)', 'ja');
 
@@ -47,51 +57,60 @@ class DayTimeline extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(20, 10, 8, 10),
-          color: AppColors.softSkyBlue.withValues(alpha: 0.35),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: AppColors.triplaTeal,
-                child: Text(
-                  'D${day.dayNumber}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
+        if (showDayHeader)
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 10, 8, 10),
+            color: AppColors.softSkyBlue.withValues(alpha: 0.35),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: AppColors.triplaTeal,
+                  child: Text(
+                    'D${day.dayNumber}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Day ${day.dayNumber}  •  ${_headerDateFormat.format(day.date)}',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.triplaTealDark,
-                      ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Day ${day.dayNumber}  •  ${_headerDateFormat.format(day.date)}',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: AppColors.triplaTealDark,
+                        ),
+                  ),
                 ),
-              ),
-              _DayLockButton(
-                day: day,
-                tripLocked: tripLocked,
-              ),
-            ],
+                _DayLockButton(
+                  day: day,
+                  tripLocked: tripLocked,
+                ),
+              ],
+            ),
           ),
-        ),
         Expanded(
           child: topicsAsync.when(
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (e, _) => Center(child: Text('$e')),
-            data: (topics) => topics.isEmpty
-                ? const _DayEmptyState()
-                : _TimelineList(
-                    day: day,
-                    tripId: tripId,
-                    topics: topics,
-                    isLocked: locked,
-                  ),
+            data: (topics) {
+              // schedule モードでは期間予定 (日跨ぎ) はカレンダー側で帯表示するため
+              // 時系列タイムラインからは除外する (移動は表示する)。
+              final visible = tripMode.isSchedule
+                  ? topics.where((t) => !t.isPeriodEvent).toList()
+                  : topics;
+              return visible.isEmpty
+                  ? const _DayEmptyState()
+                  : _TimelineList(
+                      day: day,
+                      tripId: tripId,
+                      topics: visible,
+                      isLocked: locked,
+                      tripMode: tripMode,
+                    );
+            },
           ),
         ),
       ],
@@ -180,6 +199,7 @@ class _TimelineList extends ConsumerWidget {
     required this.tripId,
     required this.topics,
     required this.isLocked,
+    required this.tripMode,
   });
 
   final Day day;
@@ -188,6 +208,7 @@ class _TimelineList extends ConsumerWidget {
 
   /// 実効ロック (Trip 一括 OR Day 個別)。true なら + / D&D / タップ無効。
   final bool isLocked;
+  final TripMode tripMode;
 
   /// orderIndex 順の Topic 群を、親グループの配列に変換する。
   /// 親が見つからない子は孤児として親扱いにする。
@@ -265,6 +286,7 @@ class _TimelineList extends ConsumerWidget {
                   // 最後の group の後ろ(Tail の手前)には + を出さない
                   isLastGroup: index == groups.length - 1,
                   isLocked: isLocked,
+                  tripMode: tripMode,
                 ),
               );
             },
@@ -288,6 +310,7 @@ class _TopicGroupTile extends ConsumerWidget {
     required this.isFirstGroup,
     required this.isLastGroup,
     required this.isLocked,
+    required this.tripMode,
   });
 
   final Day day;
@@ -298,11 +321,17 @@ class _TopicGroupTile extends ConsumerWidget {
 
   /// 実効ロック。true なら drag handle / + ボタン / カードタップ全部無効。
   final bool isLocked;
+  final TripMode tripMode;
 
   /// 編集はモーダル (TopicEditorSheet) で行う。
   /// 全画面のトピック編集ルート (/trips/:id/topics/:topicId) は使わない。
   void _openEdit(BuildContext context, Topic topic) {
-    showTopicEditorSheet(context: context, day: day, existing: topic);
+    showTopicEditorSheet(
+      context: context,
+      day: day,
+      existing: topic,
+      tripMode: tripMode,
+    );
   }
 
   @override
@@ -316,6 +345,7 @@ class _TopicGroupTile extends ConsumerWidget {
         _TimelineEntry(
           topic: parent,
           tripId: day.tripId,
+          tripMode: tripMode,
           isParent: true,
           // 先頭グループの親は上端
           isTimelineTop: isFirstGroup,
@@ -340,6 +370,7 @@ class _TopicGroupTile extends ConsumerWidget {
           _TimelineEntry(
             topic: children[i],
             tripId: day.tripId,
+            tripMode: tripMode,
             isParent: false,
             // 子は親の下にあるので上端には来ない
             isTimelineTop: false,
@@ -351,7 +382,7 @@ class _TopicGroupTile extends ConsumerWidget {
         // この group の直後 (次の group との間) に + を出す。
         // ただし最後の group のあとには出さない / ロック中も出さない。
         if (!isLastGroup && !isLocked)
-          _AddBetweenButton(day: day, afterTopicId: parent.id),
+          _AddBetweenButton(day: day, afterTopicId: parent.id, tripMode: tripMode),
       ],
     );
   }
@@ -418,6 +449,7 @@ class _TimelineEntry extends StatelessWidget {
   const _TimelineEntry({
     required this.topic,
     required this.tripId,
+    required this.tripMode,
     required this.onTap,
     required this.isParent,
     this.isTimelineTop = false,
@@ -428,6 +460,7 @@ class _TimelineEntry extends StatelessWidget {
 
   final Topic topic;
   final String tripId;
+  final TripMode tripMode;
 
   /// null ならタップ無効 (ロック中)。
   final VoidCallback? onTap;
@@ -471,6 +504,7 @@ class _TimelineEntry extends StatelessWidget {
                   TopicTile(
                     topic: topic,
                     tripId: tripId,
+                    tripMode: tripMode,
                     onTap: onTap,
                     showTime: false,
                   ),
@@ -716,10 +750,12 @@ class _AddBetweenButton extends StatelessWidget {
   const _AddBetweenButton({
     required this.day,
     required this.afterTopicId,
+    required this.tripMode,
   });
 
   final Day day;
   final String afterTopicId;
+  final TripMode tripMode;
 
   @override
   Widget build(BuildContext context) {
@@ -760,6 +796,7 @@ class _AddBetweenButton extends StatelessWidget {
                         context: context,
                         day: day,
                         insertAfterTopicId: afterTopicId,
+                        tripMode: tripMode,
                       ),
                       child: const SizedBox(
                         width: 22,

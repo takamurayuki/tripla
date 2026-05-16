@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../domain/entities/trip.dart';
+import '../../domain/entities/trip_mode.dart';
 import '../datasources/local/database.dart';
 
 /// 旅程の永続化を担うリポジトリ。
@@ -15,9 +16,14 @@ class TripRepository {
   final Uuid _uuid;
 
   /// 全旅程を `updatedAt` 降順で監視する。
-  Stream<List<Trip>> watchAll() {
+  /// 既定では「旅行計画」のみ。 schedule (singleton マイスケジュール) は別動線で扱うため除外。
+  /// 全件を取りたい場合は [includeSchedule]=true。
+  Stream<List<Trip>> watchAll({bool includeSchedule = false}) {
     final query = _db.select(_db.trips)
       ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]);
+    if (!includeSchedule) {
+      query.where((t) => t.mode.equals(TripMode.plan.name));
+    }
     return query.watch().map(
           (rows) => rows.map(_toEntity).toList(growable: false),
         );
@@ -71,6 +77,7 @@ class TripRepository {
     String? coverImageUrl,
     String baseCurrency = 'JPY',
     String? travelCurrency,
+    TripMode mode = TripMode.plan,
   }) async {
     final now = DateTime.now();
     final id = _uuid.v4();
@@ -85,11 +92,49 @@ class TripRepository {
             coverImageUrl: Value(coverImageUrl),
             baseCurrency: Value(baseCurrency),
             travelCurrency: Value(travelCurrency),
+            mode: Value(mode.name),
             createdAt: now,
             updatedAt: now,
           ),
         );
     return id;
+  }
+
+  /// マイスケジュール (mode=schedule) を監視。 未作成なら null を流す。
+  Stream<Trip?> watchSchedule(String ownerId) {
+    final query = _db.select(_db.trips)
+      ..where((t) =>
+          t.ownerId.equals(ownerId) & t.mode.equals(TripMode.schedule.name))
+      ..limit(1);
+    return query.watchSingleOrNull().map(
+          (row) => row == null ? null : _toEntity(row),
+        );
+  }
+
+  /// マイスケジュール (mode=schedule) を取得 or 作成 (singleton)。
+  /// 指定 ownerId に対して 1 件だけ存在する想定。
+  /// 既存があれば返し、 無ければ作成して返す。
+  ///
+  /// 期間は便宜的に「今日 〜 1年後」 を初期値にする (UI 上は使われない)。
+  /// 実際の利用日は Day を都度ensure で生やす形式 (Phase 2 で実装)。
+  Future<Trip> getOrCreateSchedule(String ownerId) async {
+    final existing = await (_db.select(_db.trips)
+          ..where((t) =>
+              t.ownerId.equals(ownerId) & t.mode.equals(TripMode.schedule.name))
+          ..limit(1))
+        .getSingleOrNull();
+    if (existing != null) return _toEntity(existing);
+
+    final today = DateTime.now();
+    final start = DateTime(today.year, today.month, today.day);
+    final id = await create(
+      ownerId: ownerId,
+      title: 'マイスケジュール',
+      startDate: start,
+      endDate: start.add(const Duration(days: 365)),
+      mode: TripMode.schedule,
+    );
+    return (await getById(id))!;
   }
 
   /// 既存旅程を更新する。タイトル等を変更した直後にも呼ぶ。
@@ -107,6 +152,7 @@ class TripRepository {
             baseCurrency: Value(updated.baseCurrency),
             travelCurrency: Value(updated.travelCurrency),
             isLocked: Value(updated.isLocked),
+            mode: Value(updated.mode.name),
             createdAt: Value(updated.createdAt),
             updatedAt: Value(updated.updatedAt),
           ),
@@ -143,9 +189,17 @@ class TripRepository {
       baseCurrency: row.baseCurrency,
       travelCurrency: row.travelCurrency,
       isLocked: row.isLocked,
+      mode: _parseMode(row.mode),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     );
+  }
+
+  TripMode _parseMode(String name) {
+    for (final m in TripMode.values) {
+      if (m.name == name) return m;
+    }
+    return TripMode.plan;
   }
 }
 

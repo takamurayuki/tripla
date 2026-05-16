@@ -12,6 +12,13 @@ class DayRepository {
   final TriplaDatabase _db;
   final Uuid _uuid;
 
+  /// ID 指定で 1 件の Day を取得 (存在しなければ null)。
+  Future<Day?> getById(String id) async {
+    final row = await (_db.select(_db.days)..where((d) => d.id.equals(id)))
+        .getSingleOrNull();
+    return row == null ? null : _toEntity(row);
+  }
+
   /// 指定 Trip に紐づく Day 群を dayNumber 昇順で監視。
   Stream<List<Day>> watchByTrip(String tripId) {
     final query = _db.select(_db.days)
@@ -45,6 +52,44 @@ class DayRepository {
     }
     if (inserts.isEmpty) return;
     await _db.batch((batch) => batch.insertAll(_db.days, inserts));
+  }
+
+  /// 任意の日付に対して Day を取得 or 新規作成する (idempotent)。
+  /// スケジュールモード (mode=schedule) で「カレンダーセルをタップ → その日に Topic 追加」
+  /// するときに使う。
+  ///
+  /// `dayNumber` は date 由来のエポック日数 (UTC) を使うことで、 重複しない一意値になる。
+  /// この値は UI で表示しない (schedule では Day 番号自体が意味を持たない)。
+  Future<Day> ensureDayForDate({
+    required String tripId,
+    required DateTime date,
+  }) async {
+    final normalized = DateTime(date.year, date.month, date.day);
+    final existing = await (_db.select(_db.days)
+          ..where((d) => d.tripId.equals(tripId) & d.date.equals(normalized))
+          ..limit(1))
+        .getSingleOrNull();
+    if (existing != null) return _toEntity(existing);
+
+    // UTC のエポック日 (1970-01-01 を 0 日目とする) を dayNumber に使うと、
+    // 1 日 1 値で衝突しない。
+    final epochDay =
+        normalized.toUtc().millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
+    final id = _uuid.v4();
+    await _db.into(_db.days).insert(
+          DaysCompanion.insert(
+            id: id,
+            tripId: tripId,
+            dayNumber: epochDay,
+            date: normalized,
+          ),
+        );
+    return Day(
+      id: id,
+      tripId: tripId,
+      dayNumber: epochDay,
+      date: normalized,
+    );
   }
 
   /// Day 個別ロックを切り替える。

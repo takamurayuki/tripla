@@ -116,6 +116,11 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
+        // ヒント文字は出発地/到着地と同じトーンで薄いグレーに統一する
+        hintStyle: TextStyle(
+          color: AppColors.softGray.withValues(alpha: 0.7),
+          fontWeight: FontWeight.w400,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide:

@@ -10,6 +10,7 @@ import '../../../providers/checklist_providers.dart';
 import '../../../providers/current_user_provider.dart';
 import '../../../providers/day_providers.dart';
 import '../../../providers/topic_providers.dart';
+import '../../../widgets/common/clearable_input.dart';
 
 /// 持ち物追加ダイアログ。
 ///
@@ -57,17 +58,19 @@ Future<void> showAddChecklistItemDialog({
                     TextField(
                       controller: nameController,
                       autofocus: true,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'アイテム名',
                         hintText: '例: 充電器',
+                        suffixIcon: clearSuffixFor(nameController),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: categoryController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'カテゴリ (任意)',
                         hintText: '例: 電子機器',
+                        suffixIcon: clearSuffixFor(categoryController),
                       ),
                     ),
                     if (availableDays.isNotEmpty) ...[
@@ -251,15 +254,17 @@ Future<void> showEditChecklistItemDialog({
                     TextField(
                       controller: nameController,
                       autofocus: true,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'アイテム名',
+                        suffixIcon: clearSuffixFor(nameController),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: categoryController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'カテゴリ (任意)',
+                        suffixIcon: clearSuffixFor(categoryController),
                       ),
                     ),
                     if (days.isNotEmpty) ...[

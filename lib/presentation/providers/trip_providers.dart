@@ -19,3 +19,10 @@ final tripByIdProvider =
     StreamProvider.autoDispose.family<Trip?, String>((ref, tripId) {
   return ref.watch(tripRepositoryProvider).watchById(tripId);
 });
+
+/// マイスケジュール (mode=schedule singleton) の Stream。 未作成なら null。
+/// ownerId はホーム画面の currentUserIdProvider 値を渡す想定。
+final scheduleTripProvider =
+    StreamProvider.autoDispose.family<Trip?, String>((ref, ownerId) {
+  return ref.watch(tripRepositoryProvider).watchSchedule(ownerId);
+});

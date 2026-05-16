@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'trip_mode.dart';
+
 /// 要件定義書 §6.1 Trip エンティティ (UI/ドメイン層向けのイミュータブル表現)。
 ///
 /// Drift のテーブル行モデルは別途自動生成される `TripRow`/`TripsCompanion` を使い、
@@ -17,6 +19,7 @@ class Trip {
     this.baseCurrency = 'JPY',
     this.travelCurrency,
     this.isLocked = false,
+    this.mode = TripMode.plan,
     required this.createdAt,
     required this.updatedAt,
   })  : assert(title.trim().isNotEmpty, 'title must not be empty'),
@@ -37,6 +40,9 @@ class Trip {
   /// true なら配下の全 Day がロック扱いになり、構成編集不可。
   final bool isLocked;
 
+  /// 旅行計画 or スケジュール (singleton)。
+  final TripMode mode;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -55,6 +61,7 @@ class Trip {
     String? baseCurrency,
     String? travelCurrency,
     bool? isLocked,
+    TripMode? mode,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -69,6 +76,7 @@ class Trip {
       baseCurrency: baseCurrency ?? this.baseCurrency,
       travelCurrency: travelCurrency ?? this.travelCurrency,
       isLocked: isLocked ?? this.isLocked,
+      mode: mode ?? this.mode,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

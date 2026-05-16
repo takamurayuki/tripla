@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../providers/current_user_provider.dart';
 import '../../providers/trip_providers.dart';
+import '../../widgets/common/clearable_input.dart';
 import '../../widgets/trita/trita_state.dart';
 import '../../widgets/trita/trita_widget.dart';
 
@@ -128,9 +129,10 @@ class _TripCreateScreenState extends ConsumerState<TripCreateScreen> {
               const SizedBox(height: 24),
               TextFormField(
                 controller: _titleController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'タイトル',
                   hintText: '例: 京都2泊3日',
+                  suffixIcon: clearSuffixFor(_titleController),
                 ),
                 textInputAction: TextInputAction.next,
                 validator: (value) {
@@ -162,10 +164,11 @@ class _TripCreateScreenState extends ConsumerState<TripCreateScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _descriptionController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'メモ (任意)',
                   hintText: '旅のテーマ、メンバー、楽しみなことなど',
-                  prefixIcon: Icon(Icons.notes_rounded),
+                  prefixIcon: const Icon(Icons.notes_rounded),
+                  suffixIcon: clearSuffixFor(_descriptionController),
                 ),
                 maxLines: 4,
               ),

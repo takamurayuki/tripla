@@ -4,36 +4,69 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/trip.dart';
+import '../../../domain/entities/trip_mode.dart';
 import '../../providers/trip_providers.dart';
 import '../../widgets/header/tripla_header.dart';
 import '../../widgets/trita/trita_speech_bubble.dart';
 import '../../widgets/trita/trita_state.dart';
 import '../../widgets/trita/trita_widget.dart';
+import 'widgets/home_mode_switch.dart';
+import 'widgets/schedule_home_view.dart';
 import 'widgets/trip_card.dart';
 
 /// S-03 ホーム画面。
 ///
-/// 旅程一覧をローカル DB から監視 (StreamProvider) し、空状態と一覧を切り替える。
-class HomeScreen extends ConsumerWidget {
+/// 上部ヘッダー右側のスイッチで「旅行計画 / スケジュール」を切り替え:
+/// - 旅行計画: 旅程一覧 (StreamProvider) を表示
+/// - スケジュール: アプリ全体で 1 つの「マイスケジュール」のカレンダー UI
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  TripMode _mode = TripMode.plan;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: TriplaHeader(
+        actions: [
+          HomeModeSwitch(
+            mode: _mode,
+            onChanged: (m) => setState(() => _mode = m),
+          ),
+        ],
+      ),
+      // スケジュールモードでは旅程一覧の購読は不要なので、 build 内で分岐する。
+      // (mode 切替時に Stream の再購読が起きないよう、 watch も分岐側でだけ呼ぶ)
+      body: _mode.isPlan
+          ? const _PlanModeBody()
+          : const ScheduleHomeView(),
+      floatingActionButton: _mode.isPlan
+          ? FloatingActionButton.extended(
+              onPressed: () => context.push('/trips/new'),
+              icon: const Icon(Icons.add),
+              label: const Text('新規作成'),
+            )
+          : null,
+    );
+  }
+}
+
+class _PlanModeBody extends ConsumerWidget {
+  const _PlanModeBody();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tripsAsync = ref.watch(tripListProvider);
-
-    return Scaffold(
-      appBar: const TriplaHeader(),
-      body: tripsAsync.when(
-        loading: () => const _HomeLoading(),
-        error: (error, _) => _HomeError(message: '$error'),
-        data: (trips) =>
-            trips.isEmpty ? const _HomeEmptyState() : _HomeTripList(trips: trips),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/trips/new'),
-        icon: const Icon(Icons.add),
-        label: const Text('新規作成'),
-      ),
+    return tripsAsync.when(
+      loading: () => const _HomeLoading(),
+      error: (error, _) => _HomeError(message: '$error'),
+      data: (trips) =>
+          trips.isEmpty ? const _HomeEmptyState() : _HomeTripList(trips: trips),
     );
   }
 }

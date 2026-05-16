@@ -1,9 +1,10 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 
+import 'topic_alt_plan.dart';
 import 'topic_category.dart';
 import 'topic_link.dart';
 import 'transport_mode.dart';
-import 'transport_plan.dart';
 
 /// 要件定義書 §6.1 Topic エンティティ + Location をフラット化 + 移動情報。
 @immutable
@@ -30,6 +31,7 @@ class Topic {
     this.transportMode,
     this.altPlans = const [],
     this.links = const [],
+    this.colorHex,
     required this.createdAt,
     required this.updatedAt,
   })  : assert(title.trim().isNotEmpty, 'title must not be empty'),
@@ -65,15 +67,19 @@ class Topic {
   /// 移動カテゴリ専用フィールド: 移動手段。
   final TransportMode? transportMode;
 
-  /// 移動カテゴリ専用フィールド: 代替プラン (プランB, C ...)。
+  /// 代替プラン (プランB, C ...)。移動 / 予定どちらでも使える。
   ///
   /// Topic 本体が「現在採用中のプラン」、altPlans がそれ以外の候補。
   /// 旅行中の状況に応じて UI から swap (採用) して切り替える。
-  final List<TransportPlan> altPlans;
+  final List<TopicAltPlan> altPlans;
 
   /// この予定に紐づくリンク (予約サイト・地図・公式 など)。
   /// タイムラインカードに OGP プレビューとして表示。
   final List<TopicLink> links;
+
+  /// 表示色オーバーライド (`#RRGGBB` / `#AARRGGBB`)。
+  /// 主に schedule モードの期間予定で利用。 null なら category.color を使う。
+  final String? colorHex;
 
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -83,6 +89,34 @@ class Topic {
   bool get hasLocation => latitude != null && longitude != null;
   bool get hasCost => cost != null;
   bool get isTransport => category == TopicCategory.transport;
+
+  /// startTime / endTime の日付が異なる「期間予定」 (出張 / 旅行 など) か。
+  /// schedule モードのカレンダーで横断バー扱いし、 日ごとのタイムラインには出さない。
+  bool get isPeriodEvent {
+    if (startTime == null || endTime == null) return false;
+    final s = DateTime(startTime!.year, startTime!.month, startTime!.day);
+    final e = DateTime(endTime!.year, endTime!.month, endTime!.day);
+    return e.isAfter(s);
+  }
+
+  /// 表示色。 [colorHex] が指定されていればそれを優先、 無ければ category.color。
+  Color get displayColor {
+    final hex = colorHex;
+    if (hex != null && hex.isNotEmpty) {
+      final parsed = _parseHexColor(hex);
+      if (parsed != null) return parsed;
+    }
+    return category.color;
+  }
+
+  static Color? _parseHexColor(String hex) {
+    var clean = hex.replaceFirst('#', '');
+    if (clean.length == 6) clean = 'FF$clean';
+    if (clean.length != 8) return null;
+    final value = int.tryParse(clean, radix: 16);
+    if (value == null) return null;
+    return Color(value);
+  }
 
   Topic copyWith({
     String? parentTopicId,
@@ -102,8 +136,9 @@ class Topic {
     String? departure,
     String? destination,
     TransportMode? transportMode,
-    List<TransportPlan>? altPlans,
+    List<TopicAltPlan>? altPlans,
     List<TopicLink>? links,
+    String? colorHex,
     DateTime? updatedAt,
   }) {
     return Topic(
@@ -128,6 +163,7 @@ class Topic {
       transportMode: transportMode ?? this.transportMode,
       altPlans: altPlans ?? this.altPlans,
       links: links ?? this.links,
+      colorHex: colorHex ?? this.colorHex,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

@@ -12,6 +12,7 @@ import '../../../domain/entities/topic.dart';
 import '../../../domain/entities/topic_category.dart';
 import '../../../domain/entities/transport_mode.dart';
 import '../../providers/topic_providers.dart';
+import '../../widgets/common/clearable_input.dart';
 
 /// 要件定義書 §7.2 S-05 トピック編集画面。
 ///
@@ -144,18 +145,33 @@ class _TopicEditViewState extends ConsumerState<_TopicEditView>
     final costText = _costController.text.trim();
     final cost = costText.isEmpty ? null : double.tryParse(costText);
 
-    return _current.copyWith(
+    // copyWith は `?? this.field` で null を「変更なし」扱いするため、
+    // メモ削除 / 費用クリア / 時刻クリア / 移動→予定切替 などで旧値が残る。
+    // 編集時は Topic を直接組み立てて null をそのまま反映する。
+    return Topic(
+      id: _current.id,
+      dayId: _current.dayId,
+      parentTopicId: _current.parentTopicId,
+      orderIndex: _current.orderIndex,
       category: _category,
       title: title.isEmpty ? '(無題の予定)' : title,
       description: description.isEmpty ? null : description,
       startTime: _startTime,
       endTime: _endTime,
-      departure: _isTransport && departure.isNotEmpty ? departure : null,
-      destination: _isTransport && destination.isNotEmpty ? destination : null,
-      transportMode: _isTransport ? _transportMode : null,
+      latitude: _current.latitude,
+      longitude: _current.longitude,
+      locationName: _current.locationName,
+      address: _current.address,
       cost: cost,
       costCurrency: cost == null ? null : (_current.costCurrency ?? 'JPY'),
       isCompleted: _isCompleted,
+      departure: _isTransport && departure.isNotEmpty ? departure : null,
+      destination: _isTransport && destination.isNotEmpty ? destination : null,
+      transportMode: _isTransport ? _transportMode : null,
+      altPlans: _current.altPlans,
+      links: _current.links,
+      createdAt: _current.createdAt,
+      updatedAt: DateTime.now(),
     );
   }
 
@@ -351,21 +367,30 @@ class _TopicEditViewState extends ConsumerState<_TopicEditView>
             const SizedBox(height: 6),
             TextField(
               controller: _departureController,
-              decoration: const InputDecoration(hintText: '例: 東京駅'),
+              decoration: InputDecoration(
+                hintText: '例: 東京駅',
+                suffixIcon: clearSuffixFor(_departureController),
+              ),
             ),
             const SizedBox(height: 16),
             _SectionLabel(icon: Icons.flag_outlined, label: '到着地'),
             const SizedBox(height: 6),
             TextField(
               controller: _destinationController,
-              decoration: const InputDecoration(hintText: '例: 京都駅'),
+              decoration: InputDecoration(
+                hintText: '例: 京都駅',
+                suffixIcon: clearSuffixFor(_destinationController),
+              ),
             ),
           ] else ...[
             _SectionLabel(icon: Icons.title_rounded, label: 'タイトル'),
             const SizedBox(height: 6),
             TextField(
               controller: _titleController,
-              decoration: const InputDecoration(hintText: '例: 清水寺観光'),
+              decoration: InputDecoration(
+                hintText: '例: 清水寺観光',
+                suffixIcon: clearSuffixFor(_titleController),
+              ),
             ),
           ],
           const SizedBox(height: 20),

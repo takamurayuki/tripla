@@ -2,9 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tripla/data/repositories/day_repository.dart';
 import 'package:tripla/data/repositories/topic_repository.dart';
 import 'package:tripla/data/repositories/trip_repository.dart';
+import 'package:tripla/domain/entities/topic_alt_plan.dart';
 import 'package:tripla/domain/entities/topic_category.dart';
 import 'package:tripla/domain/entities/transport_mode.dart';
-import 'package:tripla/domain/entities/transport_plan.dart';
 
 import '../../helpers/test_db.dart';
 
@@ -90,7 +90,7 @@ void main() {
         title: '東京 → 池袋',
         transportMode: TransportMode.taxi,
         altPlans: [
-          TransportPlan(
+          TopicAltPlan(
             id: 'p1',
             label: 'プランA',
             departure: '東京',
@@ -115,7 +115,7 @@ void main() {
       // update でプランを追加
       await topicRepo.update(created.copyWith(altPlans: [
         ...created.altPlans,
-        TransportPlan(
+        TopicAltPlan(
           id: 'p2',
           label: 'プランB',
           transportMode: TransportMode.bus,

@@ -6,7 +6,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../domain/entities/checklist_item.dart';
 import '../../../../domain/entities/topic.dart';
+import '../../../../domain/entities/topic_category.dart';
 import '../../../../domain/entities/topic_link.dart';
+import '../../../../domain/entities/trip_mode.dart';
 import '../../../providers/checklist_providers.dart';
 
 /// タイムライン上の Topic 単体表示。
@@ -25,6 +27,7 @@ class TopicTile extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.showTime = true,
+    this.tripMode = TripMode.plan,
   });
 
   final Topic topic;
@@ -35,6 +38,9 @@ class TopicTile extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool showTime;
+
+  /// schedule モード時はカテゴリ表示を「観光 → イベント」に差し替える。
+  final TripMode tripMode;
 
   static final _timeFormat = DateFormat('HH:mm');
 
@@ -69,7 +75,11 @@ class TopicTile extends StatelessWidget {
                   ? _TransportContent(
                       topic: topic, tripId: tripId, showTime: showTime)
                   : _PlanContent(
-                      topic: topic, tripId: tripId, showTime: showTime),
+                      topic: topic,
+                      tripId: tripId,
+                      showTime: showTime,
+                      tripMode: tripMode,
+                    ),
             ),
           ),
         ),
@@ -94,10 +104,12 @@ class _PlanContent extends ConsumerWidget {
   const _PlanContent({
     required this.topic,
     required this.tripId,
+    required this.tripMode,
     this.showTime = true,
   });
   final Topic topic;
   final String tripId;
+  final TripMode tripMode;
   final bool showTime;
 
   @override
@@ -115,7 +127,7 @@ class _PlanContent extends ConsumerWidget {
             borderRadius: BorderRadius.circular(10),
           ),
           alignment: Alignment.center,
-          child: Icon(cat.icon, color: cat.color, size: 20),
+          child: Icon(cat.iconFor(tripMode), color: cat.color, size: 20),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -144,7 +156,7 @@ class _PlanContent extends ConsumerWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      cat.label,
+                      cat.labelFor(tripMode),
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,

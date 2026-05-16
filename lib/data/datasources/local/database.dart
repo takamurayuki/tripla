@@ -24,6 +24,12 @@ class Trips extends Table {
   BoolColumn get isLocked =>
       boolean().named('is_locked').withDefault(const Constant(false))();
 
+  /// Trip の種類 (TripMode.name)。
+  /// - 'plan' = 通常の旅行計画 (start/endDate を持ち Day1..N に分割)
+  /// - 'schedule' = アプリ全体で 1 件だけ存在するマイスケジュール
+  TextColumn get mode =>
+      text().withDefault(const Constant('plan'))();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -91,11 +97,16 @@ class Topics extends Table {
   TextColumn get transportMode =>
       text().named('transport_mode').nullable()();
 
-  /// 移動カテゴリ専用: 代替プランの JSON 配列 (TransportPlan)。
+  /// 代替プランの JSON 配列 (TopicAltPlan)。移動 / 予定どちらでも使う。
   TextColumn get altPlans => text().named('alt_plans').nullable()();
 
   /// 紐づくリンク (TopicLink) の JSON 配列。null/空配列の両方を許容。
   TextColumn get links => text().nullable()();
+
+  /// 表示色オーバーライド (#RRGGBB / #AARRGGBB)。
+  /// 主に schedule モードの期間予定で利用 (カテゴリ色とは独立に自由選択)。
+  /// null なら category.color にフォールバックする。
+  TextColumn get colorHex => text().named('color_hex').nullable()();
 
   DateTimeColumn get createdAt => dateTime().named('created_at')();
   DateTimeColumn get updatedAt => dateTime().named('updated_at')();
@@ -144,7 +155,7 @@ class TriplaDatabase extends _$TriplaDatabase {
   TriplaDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -200,6 +211,15 @@ class TriplaDatabase extends _$TriplaDatabase {
               "UPDATE checklist_items SET created_by_user_id = 'local-user' "
               'WHERE created_by_user_id IS NULL',
             );
+          }
+          if (from < 9) {
+            await m.addColumn(trips, trips.mode);
+            await customStatement(
+              "UPDATE trips SET mode = 'plan' WHERE mode IS NULL",
+            );
+          }
+          if (from < 10) {
+            await m.addColumn(topics, topics.colorHex);
           }
         },
       );

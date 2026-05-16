@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../presentation/features/home/home_screen.dart';
+import '../../presentation/features/schedule/schedule_day_screen.dart';
 import '../../presentation/features/splash/splash_screen.dart';
 import '../../presentation/features/topic_edit/topic_edit_screen.dart';
 import '../../presentation/features/trip_create/trip_create_screen.dart';
@@ -29,6 +30,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/trips/new',
         name: 'tripCreate',
         builder: (context, state) => const TripCreateScreen(),
+      ),
+      GoRoute(
+        path: '/schedule/days/:dayId',
+        name: 'scheduleDay',
+        builder: (context, state) {
+          final id = state.pathParameters['dayId']!;
+          return ScheduleDayScreen(dayId: id);
+        },
       ),
       GoRoute(
         path: '/trips/:tripId',

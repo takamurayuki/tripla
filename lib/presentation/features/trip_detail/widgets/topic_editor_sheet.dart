@@ -6,11 +6,13 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/handle_async_action.dart';
 import '../../../../domain/entities/day.dart';
 import '../../../../domain/entities/topic.dart';
+import '../../../../domain/entities/topic_alt_plan.dart';
 import '../../../../domain/entities/topic_category.dart';
 import '../../../../domain/entities/topic_link.dart';
 import '../../../../domain/entities/transport_mode.dart';
-import '../../../../domain/entities/transport_plan.dart';
+import '../../../../domain/entities/trip_mode.dart';
 import '../../../providers/topic_providers.dart';
+import '../../../widgets/common/clearable_input.dart';
 
 /// 予定の新規追加 / 編集 BottomSheet。
 ///
@@ -25,6 +27,7 @@ Future<void> showTopicEditorSheet({
   required Day day,
   Topic? existing,
   String? insertAfterTopicId,
+  TripMode tripMode = TripMode.plan,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -41,6 +44,7 @@ Future<void> showTopicEditorSheet({
         day: day,
         existing: existing,
         insertAfterTopicId: insertAfterTopicId,
+        tripMode: tripMode,
       ),
     ),
   );
@@ -53,11 +57,13 @@ class _TopicEditorSheet extends ConsumerStatefulWidget {
     required this.day,
     this.existing,
     this.insertAfterTopicId,
+    this.tripMode = TripMode.plan,
   });
 
   final Day day;
   final Topic? existing;
   final String? insertAfterTopicId;
+  final TripMode tripMode;
 
   @override
   ConsumerState<_TopicEditorSheet> createState() => _TopicEditorSheetState();
@@ -77,9 +83,9 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
   TransportMode _transportMode = TransportMode.train;
   bool _saving = false;
 
-  /// 編集中の代替プラン (移動モード専用)。
+  /// 編集中の代替プラン (移動 / 予定 どちらでも使う)。
   /// 「採用」ボタンでフォームの値とスワップする。
-  List<TransportPlan> _altPlans = [];
+  List<TopicAltPlan> _altPlans = [];
 
   /// 編集中のリンク。保存ボタンで Topic に反映される。
   List<TopicLink> _links = [];
@@ -107,28 +113,39 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
       _descriptionController.text = ex.description ?? '';
       _startController.text = _formatTime(ex.startTime);
       _endController.text = _formatTime(ex.endTime);
-      _altPlans = List<TransportPlan>.from(ex.altPlans);
+      _altPlans = List<TopicAltPlan>.from(ex.altPlans);
       _links = List<TopicLink>.from(ex.links);
     }
   }
 
-  /// 現在のフォーム値から TransportPlan を構築 (採用案以外を保存するときに使う)。
-  TransportPlan _planFromForm({String? id, String? label}) {
-    final dep = _departureController.text.trim();
-    final dest = _destinationController.text.trim();
+  /// 現在のフォーム値から TopicAltPlan を構築 (採用案以外を保存するときに使う)。
+  /// 移動モード / 予定モードで埋めるフィールドを切り替える。
+  TopicAltPlan _planFromForm({String? id, String? label}) {
     final note = _descriptionController.text.trim();
-    return TransportPlan(
+    final startT = _parseTime(_startController.text);
+    final endT = _parseTime(_endController.text);
+    if (_mode == _Mode.transport) {
+      final dep = _departureController.text.trim();
+      final dest = _destinationController.text.trim();
+      return TopicAltPlan(
+        id: id ?? _uuid.v4(),
+        label: label,
+        departure: dep.isEmpty ? null : dep,
+        destination: dest.isEmpty ? null : dest,
+        transportMode: _transportMode,
+        startTime: startT == null ? null : _toDateTime(startT),
+        endTime: endT == null ? null : _toDateTime(endT),
+        note: note.isEmpty ? null : note,
+      );
+    }
+    final title = _titleController.text.trim();
+    return TopicAltPlan(
       id: id ?? _uuid.v4(),
       label: label,
-      departure: dep.isEmpty ? null : dep,
-      destination: dest.isEmpty ? null : dest,
-      transportMode: _transportMode,
-      startTime: _parseTime(_startController.text) == null
-          ? null
-          : _toDateTime(_parseTime(_startController.text)!),
-      endTime: _parseTime(_endController.text) == null
-          ? null
-          : _toDateTime(_parseTime(_endController.text)!),
+      title: title.isEmpty ? null : title,
+      category: _planCategory,
+      startTime: startT == null ? null : _toDateTime(startT),
+      endTime: endT == null ? null : _toDateTime(endT),
       note: note.isEmpty ? null : note,
     );
   }
@@ -168,18 +185,25 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
   /// 「このプランを採用」 — index のプランをフォームに展開し、
   /// 元のフォーム値を新規プランとして altPlans の同じ位置に挿入する (スワップ)。
   /// altPlans の変更は即 DB 反映する。
+  /// 現在のモード (移動 / 予定) に対応するフィールドを更新する。
   Future<void> _adoptPlan(int index) async {
     final picked = _altPlans[index];
     final swappedOut = _planFromForm();
     setState(() {
-      // フォームに採用プランの値を展開
-      _departureController.text = picked.departure ?? '';
-      _destinationController.text = picked.destination ?? '';
       _descriptionController.text = picked.note ?? '';
       _startController.text = _formatTime(picked.startTime);
       _endController.text = _formatTime(picked.endTime);
-      if (picked.transportMode != null) {
-        _transportMode = picked.transportMode!;
+      if (_mode == _Mode.transport) {
+        _departureController.text = picked.departure ?? '';
+        _destinationController.text = picked.destination ?? '';
+        if (picked.transportMode != null) {
+          _transportMode = picked.transportMode!;
+        }
+      } else {
+        _titleController.text = picked.title ?? '';
+        if (picked.category != null) {
+          _planCategory = picked.category!;
+        }
       }
       // altPlans から採用プランを取り除き、スワップ元を同じ位置に挿入
       final next = [..._altPlans];
@@ -254,21 +278,39 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
     setState(() => _saving = true);
     try {
       final repo = ref.read(topicRepositoryProvider);
-      // 予定モードでは altPlans は意味を持たないので空にする。
-      final plansToSave = isTransport ? _altPlans : const <TransportPlan>[];
+      // 移動 / 予定どちらでも代替プランは保存する。
+      final plansToSave = _altPlans;
       if (_isEditing) {
-        final updated = widget.existing!.copyWith(
+        // copyWith は `?? this.field` で null を「変更なし」と扱うため、
+        // 「メモ削除」や「移動→予定への切替で出発地/到着地/手段を空に」
+        // した場合に旧値が残ってしまう。
+        // そのため編集時は Topic を直接組み立てて、null をそのまま反映する。
+        final ex = widget.existing!;
+        final updated = Topic(
+          id: ex.id,
+          dayId: ex.dayId,
+          parentTopicId: ex.parentTopicId,
+          orderIndex: ex.orderIndex,
           category: category,
           title: title,
           description: description.isEmpty ? null : description,
           startTime: _toDateTime(startT),
           endTime: _toDateTime(endT),
+          latitude: ex.latitude,
+          longitude: ex.longitude,
+          locationName: ex.locationName,
+          address: ex.address,
+          cost: ex.cost,
+          costCurrency: ex.costCurrency,
+          isCompleted: ex.isCompleted,
           departure: departure == null || departure.isEmpty ? null : departure,
           destination:
               destination == null || destination.isEmpty ? null : destination,
           transportMode: transport,
           altPlans: plansToSave,
           links: _links,
+          createdAt: ex.createdAt,
+          updatedAt: DateTime.now(),
         );
         await repo.update(updated);
       } else {
@@ -351,18 +393,20 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
               children: [
                 TextFormField(
                   controller: labelController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'ラベル (任意)',
                     hintText: '例: 予約サイト',
+                    suffixIcon: clearSuffixFor(labelController),
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: urlController,
                   autofocus: existing == null,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'URL',
                     hintText: 'https://...',
+                    suffixIcon: clearSuffixFor(urlController),
                   ),
                   keyboardType: TextInputType.url,
                   validator: (value) {
@@ -515,16 +559,14 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
                 });
               },
             ),
-            // 代替プランセクション (移動モード専用)
-            if (_mode == _Mode.transport) ...[
-              const SizedBox(height: 16),
-              _AltPlanSection(
-                plans: _altPlans,
-                onSaveCurrent: _saveCurrentAsAltPlan,
-                onAdopt: _adoptPlan,
-                onRemove: _removePlan,
-              ),
-            ],
+            // 代替プランセクション (移動 / 予定 どちらでも表示)
+            const SizedBox(height: 16),
+            _AltPlanSection(
+              plans: _altPlans,
+              onSaveCurrent: _saveCurrentAsAltPlan,
+              onAdopt: _adoptPlan,
+              onRemove: _removePlan,
+            ),
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: _saving ? null : _onSave,
@@ -578,15 +620,17 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
   }
 
   List<Widget> _buildPlanFields(BuildContext context) {
+    // schedule モードでは「宿泊」は対象外、 「観光」 は「イベント」 として表示する。
     final categories =
-        TopicCategory.values.where((c) => c != TopicCategory.transport);
+        TopicCategoryDisplay.selectableForPlanMode(widget.tripMode);
     return [
       TextFormField(
         controller: _titleController,
         autofocus: !_isEditing,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           labelText: 'タイトル',
           hintText: '例: 清水寺観光',
+          suffixIcon: clearSuffixFor(_titleController),
         ),
         validator: (value) {
           if (value == null || value.trim().isEmpty) {
@@ -605,9 +649,10 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
               label: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(cat.icon, size: 16, color: cat.color),
+                  Icon(cat.iconFor(widget.tripMode),
+                      size: 16, color: cat.color),
                   const SizedBox(width: 4),
-                  Text(cat.label),
+                  Text(cat.labelFor(widget.tripMode)),
                 ],
               ),
               selected: cat == _planCategory,
@@ -624,19 +669,21 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
       TextFormField(
         controller: _departureController,
         autofocus: !_isEditing,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           labelText: '出発地',
           hintText: '例: 東京駅',
-          prefixIcon: Icon(Icons.trip_origin_rounded),
+          prefixIcon: const Icon(Icons.trip_origin_rounded),
+          suffixIcon: clearSuffixFor(_departureController),
         ),
       ),
       const SizedBox(height: 12),
       TextFormField(
         controller: _destinationController,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           labelText: '到着地',
           hintText: '例: 京都駅',
-          prefixIcon: Icon(Icons.flag_outlined),
+          prefixIcon: const Icon(Icons.flag_outlined),
+          suffixIcon: clearSuffixFor(_destinationController),
         ),
       ),
       const SizedBox(height: 12),
@@ -712,7 +759,7 @@ class _AltPlanSection extends StatelessWidget {
     required this.onRemove,
   });
 
-  final List<TransportPlan> plans;
+  final List<TopicAltPlan> plans;
   final VoidCallback onSaveCurrent;
   final ValueChanged<int> onAdopt;
   final ValueChanged<int> onRemove;
@@ -808,7 +855,7 @@ class _AltPlanRow extends StatelessWidget {
   });
 
   final int index;
-  final TransportPlan plan;
+  final TopicAltPlan plan;
   final VoidCallback onAdopt;
   final VoidCallback onRemove;
 
@@ -818,15 +865,24 @@ class _AltPlanRow extends StatelessWidget {
   }
 
   String _summary() {
-    final mode = plan.transportMode?.label;
-    final dep = plan.departure;
-    final dest = plan.destination;
     final time = _timeRange(plan.startTime, plan.endTime);
+    if (plan.isTransportShape) {
+      final mode = plan.transportMode?.label;
+      final dep = plan.departure;
+      final dest = plan.destination;
+      final parts = <String>[
+        ?mode,
+        if (dep != null && dest != null) '$dep → $dest'
+        else if (dep != null) '$dep 発'
+        else if (dest != null) '$dest 着',
+        if (time.isNotEmpty) time,
+      ];
+      return parts.isEmpty ? '(内容未設定)' : parts.join(' / ');
+    }
+    // 予定モード
     final parts = <String>[
-      ?mode,
-      if (dep != null && dest != null) '$dep → $dest'
-      else if (dep != null) '$dep 発'
-      else if (dest != null) '$dest 着',
+      if (plan.title != null && plan.title!.isNotEmpty) plan.title!,
+      if (plan.category != null) plan.category!.label,
       if (time.isNotEmpty) time,
     ];
     return parts.isEmpty ? '(内容未設定)' : parts.join(' / ');
@@ -854,9 +910,13 @@ class _AltPlanRow extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                plan.transportMode?.icon ?? Icons.alt_route_rounded,
+                plan.isTransportShape
+                    ? (plan.transportMode?.icon ?? Icons.alt_route_rounded)
+                    : (plan.category?.icon ?? Icons.alt_route_rounded),
                 size: 18,
-                color: AppColors.triplaTealDark,
+                color: plan.isTransportShape
+                    ? AppColors.triplaTealDark
+                    : (plan.category?.color ?? AppColors.triplaTealDark),
               ),
               const SizedBox(width: 10),
               Expanded(
