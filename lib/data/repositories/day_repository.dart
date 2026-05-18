@@ -99,6 +99,13 @@ class DayRepository {
     );
   }
 
+  /// Day 完了フラグを切り替える。 タイムライン末尾の「おつかれさま！」 旗表示用。
+  Future<void> setCompleted(String id, bool value) async {
+    await (_db.update(_db.days)..where((d) => d.id.equals(id))).write(
+      DaysCompanion(isCompleted: Value(value)),
+    );
+  }
+
   Day _toEntity(DayRow row) {
     return Day(
       id: row.id,
@@ -107,6 +114,7 @@ class DayRepository {
       date: row.date,
       note: row.note,
       isLocked: row.isLocked,
+      isCompleted: row.isCompleted,
     );
   }
 }

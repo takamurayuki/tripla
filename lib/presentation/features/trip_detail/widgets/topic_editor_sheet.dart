@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../../core/theme/app_colors.dart';
@@ -9,8 +10,12 @@ import '../../../../domain/entities/topic.dart';
 import '../../../../domain/entities/topic_alt_plan.dart';
 import '../../../../domain/entities/topic_category.dart';
 import '../../../../domain/entities/topic_link.dart';
+import '../../../../domain/entities/train_transfer.dart';
 import '../../../../domain/entities/transport_mode.dart';
 import '../../../../domain/entities/trip_mode.dart';
+import '../../../providers/photo_storage_provider.dart';
+import 'topic_photos_section.dart';
+import 'train_transfer_section.dart';
 import '../../../providers/topic_providers.dart';
 import '../../../widgets/common/clearable_input.dart';
 
@@ -90,6 +95,13 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
   /// 編集中のリンク。保存ボタンで Topic に反映される。
   List<TopicLink> _links = [];
 
+  /// 編集中の写真パス (アプリ docs からの相対パス)。
+  /// 追加 / 削除のたびに DB へ即時反映する (画像ファイルとの不整合を避けるため)。
+  List<String> _photos = [];
+
+  /// 編集中の乗換情報。 保存ボタンで Topic に反映。
+  List<TrainTransfer> _trainTransfers = [];
+
   final _uuid = const Uuid();
 
   bool get _isEditing => widget.existing != null;
@@ -115,6 +127,8 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
       _endController.text = _formatTime(ex.endTime);
       _altPlans = List<TopicAltPlan>.from(ex.altPlans);
       _links = List<TopicLink>.from(ex.links);
+      _photos = List<String>.from(ex.photos);
+      _trainTransfers = List<TrainTransfer>.from(ex.trainTransfers);
     }
   }
 
@@ -220,6 +234,73 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
     await _persistAltPlans();
   }
 
+  /// 写真をピックして保存。 編集中なら DB に即時反映。
+  Future<void> _onAddPhoto(ImageSource source) async {
+    final storage = ref.read(photoStorageProvider);
+    if (!storage.isSupported) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('現在のプラットフォームでは写真の保存に未対応です')),
+      );
+      return;
+    }
+    final picker = ImagePicker();
+    final XFile? file;
+    try {
+      file = await picker.pickImage(
+        source: source,
+        maxWidth: 1600,
+        imageQuality: 85,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('写真の取得に失敗しました: $error')),
+      );
+      return;
+    }
+    if (file == null) return;
+    try {
+      final bytes = await file.readAsBytes();
+      final topicId = widget.existing?.id ?? 'pending-${_uuid.v4()}';
+      final path = await storage.save(
+        topicId: topicId,
+        bytes: bytes,
+        originalName: file.name,
+      );
+      setState(() => _photos = [..._photos, path]);
+      await _persistPhotos();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('写真の保存に失敗しました: $error')),
+      );
+    }
+  }
+
+  Future<void> _onRemovePhoto(int index) async {
+    final removed = _photos[index];
+    setState(() => _photos = [..._photos]..removeAt(index));
+    await _persistPhotos();
+    // 物理ファイルも削除 (失敗は無視 — 不整合になっても表示には影響なし)
+    try {
+      await ref.read(photoStorageProvider).deleteOne(removed);
+    } catch (_) {}
+  }
+
+  /// 写真の現在状態を DB に反映。 既存 Topic 編集時のみ動く (新規はまだ Topic がない)。
+  Future<void> _persistPhotos() async {
+    if (!_isEditing) return;
+    final ex = widget.existing!;
+    await handleAsyncAction(
+      context,
+      () => ref
+          .read(topicRepositoryProvider)
+          .update(ex.copyWith(photos: _photos)),
+      errorMessage: '写真の保存に失敗しました',
+    );
+  }
+
   @override
   void dispose() {
     _titleController.dispose();
@@ -309,6 +390,8 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
           transportMode: transport,
           altPlans: plansToSave,
           links: _links,
+          photos: _photos,
+          trainTransfers: _trainTransfers,
           createdAt: ex.createdAt,
           updatedAt: DateTime.now(),
         );
@@ -327,6 +410,8 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
           transportMode: transport,
           altPlans: plansToSave,
           links: _links,
+          photos: _photos,
+          trainTransfers: _trainTransfers,
         );
         // insertAfterTopicId が指定されていれば parent の orderIndex を再振りして
         // 指定位置に挿入する。
@@ -512,6 +597,16 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
                 if (_mode == _Mode.transport)
                   ..._buildTransportFields(context),
                 if (_mode == _Mode.plan) ..._buildPlanFields(context),
+                // 電車選択時のみ乗換情報セクションを表示
+                if (_mode == _Mode.transport &&
+                    _transportMode == TransportMode.train) ...[
+                  const SizedBox(height: 12),
+                  TrainTransferSection(
+                    transfers: _trainTransfers,
+                    onChanged: (next) =>
+                        setState(() => _trainTransfers = next),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 _TimeRangeRow(
                   startController: _startController,
@@ -556,6 +651,14 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
                       _links = [..._links]..removeAt(index);
                     });
                   },
+                ),
+                // 写真添付セクション
+                const SizedBox(height: 16),
+                TopicPhotosSection(
+                  photos: _photos,
+                  onAddFromCamera: () => _onAddPhoto(ImageSource.camera),
+                  onAddFromGallery: () => _onAddPhoto(ImageSource.gallery),
+                  onRemove: _onRemovePhoto,
                 ),
                 // 代替プランセクション (移動 / 予定 どちらでも表示)
                 const SizedBox(height: 16),
@@ -679,12 +782,16 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
   }
 
   List<Widget> _buildTransportFields(BuildContext context) {
+    // 電車の場合は「出発駅 / 到着駅」 ラベル + 例も駅名に。
+    final isTrain = _transportMode == TransportMode.train;
+    final depLabel = isTrain ? '出発駅' : '出発地';
+    final destLabel = isTrain ? '到着駅' : '到着地';
     return [
       TextFormField(
         controller: _departureController,
         autofocus: !_isEditing,
         decoration: InputDecoration(
-          labelText: '出発地',
+          labelText: depLabel,
           hintText: '例: 東京駅',
           prefixIcon: const Icon(Icons.trip_origin_rounded),
           suffixIcon: clearSuffixFor(_departureController),
@@ -694,7 +801,7 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
       TextFormField(
         controller: _destinationController,
         decoration: InputDecoration(
-          labelText: '到着地',
+          labelText: destLabel,
           hintText: '例: 京都駅',
           prefixIcon: const Icon(Icons.flag_outlined),
           suffixIcon: clearSuffixFor(_destinationController),

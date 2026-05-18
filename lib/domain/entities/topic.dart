@@ -4,6 +4,7 @@ import 'package:flutter/painting.dart';
 import 'topic_alt_plan.dart';
 import 'topic_category.dart';
 import 'topic_link.dart';
+import 'train_transfer.dart';
 import 'transport_mode.dart';
 
 /// 要件定義書 §6.1 Topic エンティティ + Location をフラット化 + 移動情報。
@@ -32,6 +33,8 @@ class Topic {
     this.altPlans = const [],
     this.links = const [],
     this.colorHex,
+    this.photos = const [],
+    this.trainTransfers = const [],
     required this.createdAt,
     required this.updatedAt,
   })  : assert(title.trim().isNotEmpty, 'title must not be empty'),
@@ -80,6 +83,13 @@ class Topic {
   /// 表示色オーバーライド (`#RRGGBB` / `#AARRGGBB`)。
   /// 主に schedule モードの期間予定で利用。 null なら category.color を使う。
   final String? colorHex;
+
+  /// 添付写真のファイルパス。 アプリのドキュメントディレクトリからの相対パス。
+  final List<String> photos;
+
+  /// 電車移動の乗換情報 (手入力)。 順番がそのまま乗換順。
+  /// 移動カテゴリ + transportMode=train 以外でも持てるが、 UI 上は train だけで編集表示する。
+  final List<TrainTransfer> trainTransfers;
 
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -139,6 +149,8 @@ class Topic {
     List<TopicAltPlan>? altPlans,
     List<TopicLink>? links,
     String? colorHex,
+    List<String>? photos,
+    List<TrainTransfer>? trainTransfers,
     DateTime? updatedAt,
   }) {
     return Topic(
@@ -164,6 +176,8 @@ class Topic {
       altPlans: altPlans ?? this.altPlans,
       links: links ?? this.links,
       colorHex: colorHex ?? this.colorHex,
+      photos: photos ?? this.photos,
+      trainTransfers: trainTransfers ?? this.trainTransfers,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

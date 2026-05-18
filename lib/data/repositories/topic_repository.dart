@@ -7,6 +7,7 @@ import '../../domain/entities/topic.dart';
 import '../../domain/entities/topic_alt_plan.dart';
 import '../../domain/entities/topic_category.dart';
 import '../../domain/entities/topic_link.dart';
+import '../../domain/entities/train_transfer.dart';
 import '../../domain/entities/transport_mode.dart';
 import '../datasources/local/database.dart';
 
@@ -59,6 +60,8 @@ class TopicRepository {
     List<TopicAltPlan> altPlans = const [],
     List<TopicLink> links = const [],
     String? colorHex,
+    List<String> photos = const [],
+    List<TrainTransfer> trainTransfers = const [],
   }) async {
     final maxOrder = await _maxOrderIndex(dayId, parentTopicId: parentTopicId);
     final now = DateTime.now();
@@ -80,6 +83,8 @@ class TopicRepository {
             altPlans: Value(_encodePlans(altPlans)),
             links: Value(_encodeLinks(links)),
             colorHex: Value(colorHex),
+            photos: Value(_encodePhotos(photos)),
+            trainTransfers: Value(_encodeTransfers(trainTransfers)),
             createdAt: now,
             updatedAt: now,
           ),
@@ -186,6 +191,8 @@ class TopicRepository {
       altPlans: _decodePlans(row.altPlans),
       links: _decodeLinks(row.links),
       colorHex: row.colorHex,
+      photos: _decodePhotos(row.photos),
+      trainTransfers: _decodeTransfers(row.trainTransfers),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     );
@@ -215,6 +222,8 @@ class TopicRepository {
       altPlans: Value(_encodePlans(t.altPlans)),
       links: Value(_encodeLinks(t.links)),
       colorHex: Value(t.colorHex),
+      photos: Value(_encodePhotos(t.photos)),
+      trainTransfers: Value(_encodeTransfers(t.trainTransfers)),
       createdAt: Value(t.createdAt),
       updatedAt: Value(t.updatedAt),
     );
@@ -248,6 +257,38 @@ class TopicRepository {
       final list = jsonDecode(raw) as List;
       return list
           .map((e) => TopicLink.fromJson(e as Map<String, dynamic>))
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  String? _encodePhotos(List<String> paths) {
+    if (paths.isEmpty) return null;
+    return jsonEncode(paths);
+  }
+
+  List<String> _decodePhotos(String? raw) {
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return list.cast<String>().toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  String? _encodeTransfers(List<TrainTransfer> transfers) {
+    if (transfers.isEmpty) return null;
+    return jsonEncode(transfers.map((t) => t.toJson()).toList());
+  }
+
+  List<TrainTransfer> _decodeTransfers(String? raw) {
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return list
+          .map((e) => TrainTransfer.fromJson(e as Map<String, dynamic>))
           .toList(growable: false);
     } catch (_) {
       return const [];

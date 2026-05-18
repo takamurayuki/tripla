@@ -188,17 +188,28 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView> {
     final trip = widget.trip;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          trip.title,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppColors.triplaTeal,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(
+                trip.title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.triplaTeal,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            TripPeriodChip(trip: trip),
+          ],
         ),
+        titleSpacing: 8,
         actions: [
+          // 出発カウントダウン (元 TripHeaderCard 相当)。 ロック button のすぐ左に置く。
+          TripCountdownBadge(trip: trip),
           _TripLockButton(trip: trip),
           PopupMenuButton<_MenuAction>(
             icon: const Icon(Icons.more_horiz),
@@ -235,21 +246,14 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView> {
           ),
         ],
       ),
-      body: Column(
+      body: IndexedStack(
+        index: _currentTab,
         children: [
-          TripHeaderCard(trip: trip),
-          Expanded(
-            child: IndexedStack(
-              index: _currentTab,
-              children: [
-                DashboardTabView(trip: trip),
-                PlanTabView(trip: trip, currentDay: _currentDay),
-                ChecklistTabView(tripId: trip.id),
-                const ExpenseTabView(),
-                const MemberTabView(),
-              ],
-            ),
-          ),
+          DashboardTabView(trip: trip),
+          PlanTabView(trip: trip, currentDay: _currentDay),
+          ChecklistTabView(tripId: trip.id),
+          const ExpenseTabView(),
+          const MemberTabView(),
         ],
       ),
       bottomNavigationBar: NavigationBar(

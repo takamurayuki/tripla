@@ -292,12 +292,71 @@ class _TimelineList extends ConsumerWidget {
             },
           ),
         ),
-        // FAB と被らないよう bottom 100px の余白を確保
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-          child: _TimelineTail(dayNumber: day.dayNumber),
-        ),
+        // 末尾エリア: schedule モードでは何も出さない。
+        // plan モードでは day.isCompleted ? 旗 : 「完了する」 ボタン。
+        if (tripMode.isPlan)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+            child: day.isCompleted
+                ? _TimelineTail(
+                    dayNumber: day.dayNumber,
+                    onUncomplete: isLocked
+                        ? null
+                        : () => handleAsyncAction(
+                              context,
+                              () => ref
+                                  .read(dayRepositoryProvider)
+                                  .setCompleted(day.id, false),
+                              errorMessage: '完了状態を更新できませんでした',
+                            ),
+                  )
+                : _CompleteDayButton(
+                    enabled: !isLocked,
+                    onTap: () => handleAsyncAction(
+                      context,
+                      () => ref
+                          .read(dayRepositoryProvider)
+                          .setCompleted(day.id, true),
+                      errorMessage: '完了状態を更新できませんでした',
+                    ),
+                  ),
+          )
+        else
+          const SizedBox(height: 100),
       ],
+    );
+  }
+}
+
+/// 「この日を完了する」 ボタン。 plan モードでまだ完了マークが無いとき末尾に表示。
+class _CompleteDayButton extends StatelessWidget {
+  const _CompleteDayButton({required this.enabled, required this.onTap});
+
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Center(
+        child: OutlinedButton.icon(
+          onPressed: enabled ? onTap : null,
+          icon: const Icon(Icons.flag_outlined),
+          label: const Text('この日を完了する'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.coralRed,
+            side: BorderSide(
+              color: AppColors.coralRed.withValues(alpha: 0.5),
+              width: 1.2,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -821,10 +880,15 @@ class _AddBetweenButton extends StatelessWidget {
 }
 
 /// タイムラインの末尾マーカー。旗アイコン + 「Day n おつかれさま！」
+/// [onUncomplete] が非 null なら右端に「完了を取り消す」 アイコンを出す。
 class _TimelineTail extends StatelessWidget {
-  const _TimelineTail({required this.dayNumber});
+  const _TimelineTail({
+    required this.dayNumber,
+    this.onUncomplete,
+  });
 
   final int dayNumber;
+  final VoidCallback? onUncomplete;
 
   @override
   Widget build(BuildContext context) {
@@ -859,8 +923,7 @@ class _TimelineTail extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child: Container(
                   margin: const EdgeInsets.only(left: 8),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
                   decoration: BoxDecoration(
                     color: AppColors.coralRed.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(14),
@@ -869,13 +932,27 @@ class _TimelineTail extends StatelessWidget {
                       width: 1,
                     ),
                   ),
-                  child: Text(
-                    'Day $dayNumber おつかれさま！',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.coralRed,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Day $dayNumber おつかれさま！',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.coralRed,
+                        ),
+                      ),
+                      if (onUncomplete != null)
+                        IconButton(
+                          tooltip: '完了を取り消す',
+                          visualDensity: VisualDensity.compact,
+                          iconSize: 16,
+                          color: AppColors.coralRed,
+                          icon: const Icon(Icons.replay_rounded),
+                          onPressed: onUncomplete,
+                        ),
+                    ],
                   ),
                 ),
               ),

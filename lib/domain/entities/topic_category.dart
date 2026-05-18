@@ -10,6 +10,11 @@ enum TopicCategory {
   meal('食事', Icons.restaurant_rounded, AppColors.tritaYellow),
   lodging('宿泊', Icons.hotel_rounded, AppColors.deepNavy),
   shopping('買い物', Icons.shopping_bag_rounded, AppColors.coralRed),
+  // schedule モード向けに追加 (旅行計画モードでは選択肢に出さない)
+  work('仕事', Icons.work_rounded, AppColors.triplaTeal),
+  rest('休憩', Icons.coffee_rounded, AppColors.mintGreen),
+  reading('読書', Icons.menu_book_rounded, AppColors.warmOrange),
+  study('勉強', Icons.school_rounded, AppColors.darkBrown),
   other('その他', Icons.bookmark_outline_rounded, AppColors.softGray);
 
   const TopicCategory(this.label, this.icon, this.color);
@@ -38,12 +43,24 @@ extension TopicCategoryDisplay on TopicCategory {
   }
 
   /// この mode で選択可能なカテゴリ一覧 (移動以外で、 編集シートのチップに使う)。
+  ///
+  /// - schedule: イベント (=sightseeing) / 食事 / 仕事 / 休憩 / 読書 / 勉強 / 買い物 / その他
+  ///   (宿泊は対象外)
+  /// - plan: 観光 / 食事 / 宿泊 / 買い物 / その他
+  ///   (仕事 / 休憩 / 読書 / 勉強 は旅行用途にそぐわないので非表示)
+  static const _scheduleOnly = {
+    TopicCategory.work,
+    TopicCategory.rest,
+    TopicCategory.reading,
+    TopicCategory.study,
+  };
+
   static List<TopicCategory> selectableForPlanMode(TripMode mode) {
-    final base = TopicCategory.values.where((c) => c != TopicCategory.transport);
+    final base =
+        TopicCategory.values.where((c) => c != TopicCategory.transport);
     if (mode.isSchedule) {
-      // スケジュールでは宿泊は不要
       return base.where((c) => c != TopicCategory.lodging).toList();
     }
-    return base.toList();
+    return base.where((c) => !_scheduleOnly.contains(c)).toList();
   }
 }

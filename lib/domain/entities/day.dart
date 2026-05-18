@@ -10,6 +10,7 @@ class Day {
     required this.date,
     this.note,
     this.isLocked = false,
+    this.isCompleted = false,
   });
 
   final String id;
@@ -21,7 +22,11 @@ class Day {
   /// Day 個別の編集ロック。Trip.isLocked と OR で実効ロック状態が決まる。
   final bool isLocked;
 
-  Day copyWith({String? note, bool? isLocked}) {
+  /// ユーザーが「この日を完了」 とマークしたか。
+  /// タイムライン末尾の「おつかれさま！」 旗表示の出し分けに使う。
+  final bool isCompleted;
+
+  Day copyWith({String? note, bool? isLocked, bool? isCompleted}) {
     return Day(
       id: id,
       tripId: tripId,
@@ -29,6 +34,7 @@ class Day {
       date: date,
       note: note ?? this.note,
       isLocked: isLocked ?? this.isLocked,
+      isCompleted: isCompleted ?? this.isCompleted,
     );
   }
 }

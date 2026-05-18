@@ -11,9 +11,6 @@ import '../../../../domain/entities/trip.dart';
 import '../../../providers/checklist_providers.dart';
 import '../../../providers/day_providers.dart';
 import '../../../providers/topic_providers.dart';
-import '../../../widgets/trita/trita_speech_bubble.dart';
-import '../../../widgets/trita/trita_state.dart';
-import '../../../widgets/trita/trita_widget.dart';
 
 /// 「ダッシュボード」上位タブ。
 ///
@@ -35,8 +32,6 @@ class DashboardTabView extends ConsumerWidget {
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
           children: [
-            const _GreetingCard(),
-            const SizedBox(height: 16),
             checklistAsync.when(
               loading: () =>
                   const _ChecklistSummary(checked: 0, total: 0, loading: true),
@@ -364,33 +359,6 @@ class _DonutPainter extends CustomPainter {
       }
     }
     return false;
-  }
-}
-
-class _GreetingCard extends StatelessWidget {
-  const _GreetingCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.paperBorder),
-      ),
-      child: Row(
-        children: [
-          const TritaWidget(state: TritaState.holdCamera, size: 64),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: TritaSpeechBubble(
-              message: '今のところこんな感じだよ！',
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 

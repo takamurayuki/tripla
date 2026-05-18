@@ -48,6 +48,10 @@ class Days extends Table {
   BoolColumn get isLocked =>
       boolean().named('is_locked').withDefault(const Constant(false))();
 
+  /// 「この日を完了」ユーザーが旗を立てたかどうか。 タイムライン末尾の旗表示に使う。
+  BoolColumn get isCompleted =>
+      boolean().named('is_completed').withDefault(const Constant(false))();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 
@@ -108,6 +112,17 @@ class Topics extends Table {
   /// null なら category.color にフォールバックする。
   TextColumn get colorHex => text().named('color_hex').nullable()();
 
+  /// 添付写真のパス (JSON 配列の文字列)。
+  /// 各要素はアプリのドキュメントディレクトリ内の相対パス
+  /// (例: `photos/<topicId>/<uuid>.jpg`)。 image_picker で取得した画像を
+  /// コピーして保存する。 null / 空配列 どちらも空扱い。
+  TextColumn get photos => text().nullable()();
+
+  /// 電車移動の乗換情報 (JSON 配列の文字列, TrainTransfer)。
+  /// 駅名 / 路線 / ホーム番号 / 乗換時間 / メモ を順に並べる。
+  TextColumn get trainTransfers =>
+      text().named('train_transfers').nullable()();
+
   DateTimeColumn get createdAt => dateTime().named('created_at')();
   DateTimeColumn get updatedAt => dateTime().named('updated_at')();
 
@@ -155,7 +170,7 @@ class TriplaDatabase extends _$TriplaDatabase {
   TriplaDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -220,6 +235,18 @@ class TriplaDatabase extends _$TriplaDatabase {
           }
           if (from < 10) {
             await m.addColumn(topics, topics.colorHex);
+          }
+          if (from < 11) {
+            await m.addColumn(days, days.isCompleted);
+            await customStatement(
+              'UPDATE days SET is_completed = 0 WHERE is_completed IS NULL',
+            );
+          }
+          if (from < 12) {
+            await m.addColumn(topics, topics.photos);
+          }
+          if (from < 13) {
+            await m.addColumn(topics, topics.trainTransfers);
           }
         },
       );

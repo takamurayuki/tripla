@@ -10,6 +10,7 @@ import '../../../../domain/entities/topic_category.dart';
 import '../../../../domain/entities/topic_link.dart';
 import '../../../../domain/entities/trip_mode.dart';
 import '../../../providers/checklist_providers.dart';
+import '../../../providers/photo_storage_provider.dart';
 
 /// タイムライン上の Topic 単体表示。
 ///
@@ -213,6 +214,10 @@ class _PlanContent extends ConsumerWidget {
                   ],
                 ),
               ],
+              if (topic.photos.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                _PhotoThumbs(paths: topic.photos),
+              ],
             ],
           ),
         ),
@@ -351,10 +356,91 @@ class _TransportContent extends ConsumerWidget {
                   ],
                 ),
               ],
+              if (topic.photos.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                _PhotoThumbs(paths: topic.photos),
+              ],
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 横スクロールの写真サムネイル列。 タイル下部に置く。
+/// 最大 4 枚まで見せて、 4 枚超過時は最後を「+N」 オーバーレイ付きで表示。
+class _PhotoThumbs extends ConsumerWidget {
+  const _PhotoThumbs({required this.paths});
+
+  final List<String> paths;
+
+  static const _max = 4;
+  static const _size = 44.0;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final storage = ref.watch(photoStorageProvider);
+    final visible = paths.length > _max ? paths.take(_max).toList() : paths;
+    final overflow = paths.length > _max ? paths.length - _max : 0;
+    return SizedBox(
+      height: _size,
+      child: Row(
+        children: [
+          for (var i = 0; i < visible.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Stack(
+                children: [
+                  FutureBuilder(
+                    future: storage.resolveAbsolute(visible[i]),
+                    builder: (context, snapshot) {
+                      final file = snapshot.data;
+                      if (file == null) {
+                        return Container(
+                          width: _size,
+                          height: _size,
+                          color: AppColors.softGray.withValues(alpha: 0.2),
+                        );
+                      }
+                      return Image.file(
+                        file,
+                        width: _size,
+                        height: _size,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Container(
+                          width: _size,
+                          height: _size,
+                          color: AppColors.softGray.withValues(alpha: 0.2),
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.broken_image_rounded,
+                              size: 18, color: AppColors.softGray),
+                        ),
+                      );
+                    },
+                  ),
+                  if (i == visible.length - 1 && overflow > 0)
+                    Positioned.fill(
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        alignment: Alignment.center,
+                        child: Text(
+                          '+$overflow',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
