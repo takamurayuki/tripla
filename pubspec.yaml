@@ -1,6 +1,6 @@
 name: tripla
 description: "旅の計画を、もっとかんたんに、もっと楽しく！ — トリ太くんと一緒に旅する旅行計画＆記録アプリ"
-publish_to: 'none'
+publish_to: "none"
 version: 0.1.0+1
 
 environment:
