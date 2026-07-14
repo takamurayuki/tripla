@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../domain/entities/day.dart';
@@ -35,17 +36,40 @@ class _PlanTabViewState extends ConsumerState<PlanTabView>
   List<Day> _days = const [];
   bool _ensured = false;
 
+  static final _tabDateFormat = DateFormat('M/d(E)', 'ja');
+
   Future<void> _ensureDays() async {
     if (_ensured) return;
     _ensured = true;
     await ref.read(dayRepositoryProvider).ensureDaysForTrip(widget.trip);
   }
 
+  /// 今日と同じ日付の Day の index を返す。旅行期間外なら 0 (Day 1)。
+  static int _todayIndex(List<Day> days) {
+    final now = DateTime.now();
+    for (var i = 0; i < days.length; i++) {
+      final d = days[i].date;
+      if (d.year == now.year && d.month == now.month && d.day == now.day) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
   void _syncController(List<Day> days) {
     if (_controller == null || _controller!.length != days.length) {
+      // 初回は「今日の Day」を初期選択 (旅行中に開いたとき探す手間を省く)。
+      // Day 数変化による再生成時はユーザーの選択位置を維持する。
+      final initialIndex = _controller == null
+          ? _todayIndex(days)
+          : _controller!.index.clamp(0, days.length - 1);
+      _controller?.removeListener(_onTabChanged);
       _controller?.dispose();
-      _controller = TabController(length: days.length, vsync: this)
-        ..addListener(_onTabChanged);
+      _controller = TabController(
+        length: days.length,
+        initialIndex: initialIndex,
+        vsync: this,
+      )..addListener(_onTabChanged);
     }
     _days = days;
     // build 中に ValueNotifier を変更すると notifyListeners が握りつぶされ、
@@ -100,7 +124,23 @@ class _PlanTabViewState extends ConsumerState<PlanTabView>
                 labelColor: AppColors.triplaTeal,
                 unselectedLabelColor: AppColors.softGray,
                 tabs: [
-                  for (final d in days) Tab(text: 'Day ${d.dayNumber}'),
+                  for (final d in days)
+                    Tab(
+                      height: 54,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('Day ${d.dayNumber}'),
+                          Text(
+                            _tabDateFormat.format(d.date),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),

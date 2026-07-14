@@ -52,6 +52,12 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
     setState(() => _viewMode = m);
   }
 
+  /// どのビューモードでも「今日」を含む期間へ即座に戻る。
+  void _goToday() {
+    final now = DateTime.now();
+    setState(() => _focusDate = DateTime(now.year, now.month, now.day));
+  }
+
   void _shift(int delta) {
     setState(() {
       switch (_viewMode) {
@@ -186,6 +192,7 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
           label: _periodLabel(),
           onPrev: () => _shift(-1),
           onNext: () => _shift(1),
+          onToday: _goToday,
         ),
         Expanded(
           child: _buildBody(trip, days, topicsByDate),
@@ -385,17 +392,19 @@ class _ViewModeSwitcher extends StatelessWidget {
   }
 }
 
-/// 期間ラベル + 前後ナビ ( < ... > )。 mode 共通。
+/// 期間ラベル + 前後ナビ ( < ... > ) + 「今日」 ボタン。 mode 共通。
 class _PeriodNavigator extends StatelessWidget {
   const _PeriodNavigator({
     required this.label,
     required this.onPrev,
     required this.onNext,
+    required this.onToday,
   });
 
   final String label;
   final VoidCallback onPrev;
   final VoidCallback onNext;
+  final VoidCallback onToday;
 
   @override
   Widget build(BuildContext context) {
@@ -417,6 +426,23 @@ class _PeriodNavigator extends StatelessWidget {
                       color: AppColors.triplaTealDark,
                     ),
               ),
+            ),
+          ),
+          TextButton(
+            onPressed: onToday,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.triplaTealDark,
+              visualDensity: VisualDensity.compact,
+              side: BorderSide(
+                color: AppColors.triplaTeal.withValues(alpha: 0.4),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text(
+              '今日',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
           ),
           IconButton(

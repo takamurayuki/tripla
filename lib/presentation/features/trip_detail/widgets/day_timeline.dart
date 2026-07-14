@@ -398,33 +398,42 @@ class _TopicGroupTile extends ConsumerWidget {
     final parent = group.parent;
     final children = group.children;
     final lastChildIndex = children.length - 1;
+    // 親カードはハンドルの即時ドラッグに加え、カード全体の長押しでも
+    // 並べ替えを開始できるようにする (ロック中はどちらも無効)。
+    final parentEntry = _TimelineEntry(
+      topic: parent,
+      tripId: day.tripId,
+      tripMode: tripMode,
+      isParent: true,
+      // 先頭グループの親は上端
+      isTimelineTop: isFirstGroup,
+      // 末尾グループ かつ 子なし のとき親が最後の足跡
+      isTimelineBottom: isLastGroup && children.isEmpty,
+      // ロック中はカードタップ無効
+      onTap: isLocked ? null : () => _openEdit(context, parent),
+      // ロック中は drag handle 非表示
+      leading: isLocked
+          ? null
+          : ReorderableDragStartListener(
+              index: reorderIndex,
+              child: const Icon(
+                Icons.drag_indicator_rounded,
+                color: AppColors.softGray,
+                size: 18,
+              ),
+            ),
+      trailing: _DurationBadge(topic: parent),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _TimelineEntry(
-          topic: parent,
-          tripId: day.tripId,
-          tripMode: tripMode,
-          isParent: true,
-          // 先頭グループの親は上端
-          isTimelineTop: isFirstGroup,
-          // 末尾グループ かつ 子なし のとき親が最後の足跡
-          isTimelineBottom: isLastGroup && children.isEmpty,
-          // ロック中はカードタップ無効
-          onTap: isLocked ? null : () => _openEdit(context, parent),
-          // ロック中は drag handle 非表示
-          leading: isLocked
-              ? null
-              : ReorderableDragStartListener(
-                  index: reorderIndex,
-                  child: const Icon(
-                    Icons.drag_indicator_rounded,
-                    color: AppColors.softGray,
-                    size: 18,
-                  ),
-                ),
-          trailing: _DurationBadge(topic: parent),
-        ),
+        if (isLocked)
+          parentEntry
+        else
+          ReorderableDelayedDragStartListener(
+            index: reorderIndex,
+            child: parentEntry,
+          ),
         for (var i = 0; i < children.length; i++)
           _TimelineEntry(
             topic: children[i],
