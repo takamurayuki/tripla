@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/handle_async_action.dart';
 import '../../../domain/entities/trip.dart';
 import '../../../domain/entities/trip_mode.dart';
 import '../../providers/trip_providers.dart';
+import '../trip_detail/widgets/trip_title_edit_dialog.dart';
 import '../../widgets/header/tripla_header.dart';
 import '../../widgets/trita/trita_speech_bubble.dart';
 import '../../widgets/trita/trita_state.dart';
@@ -151,13 +153,146 @@ class _HomeEmptyState extends StatelessWidget {
   }
 }
 
-class _HomeTripList extends StatelessWidget {
+class _HomeTripList extends ConsumerWidget {
   const _HomeTripList({required this.trips});
 
   final List<Trip> trips;
 
+  /// カード長押しで開くアクションシート (タイトルを編集 / 旅程を削除)。
+  /// 旅程詳細画面まで遷移しなくても一覧から管理操作できるようにする。
+  Future<void> _showTripActions(
+    BuildContext context,
+    WidgetRef ref,
+    Trip trip,
+  ) async {
+    final action = await showModalBottomSheet<_TripAction>(
+      context: context,
+      backgroundColor: AppColors.paperWhite,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  trip.title,
+                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.triplaTealDark,
+                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_rounded,
+                  color: AppColors.triplaTeal),
+              title: const Text('タイトルを編集'),
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(_TripAction.editTitle),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.delete_outline_rounded, color: AppColors.coralRed),
+              title: const Text(
+                '旅程を削除',
+                style: TextStyle(color: AppColors.coralRed),
+              ),
+              onTap: () => Navigator.of(sheetContext).pop(_TripAction.delete),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !context.mounted) return;
+    switch (action) {
+      case _TripAction.editTitle:
+        await _onEditTitle(context, ref, trip);
+      case _TripAction.delete:
+        await _onDelete(context, ref, trip);
+    }
+  }
+
+  Future<void> _onEditTitle(
+    BuildContext context,
+    WidgetRef ref,
+    Trip trip,
+  ) async {
+    final newTitle = await showTripTitleEditDialog(
+      context: context,
+      trip: trip,
+    );
+    if (newTitle == null || newTitle == trip.title) return;
+    if (!context.mounted) return;
+    await handleAsyncAction(
+      context,
+      () => ref
+          .read(tripRepositoryProvider)
+          .update(trip.copyWith(title: newTitle)),
+      errorMessage: 'タイトルを保存できませんでした',
+    );
+  }
+
+  /// 削除確認は旅程詳細画面 (_TripDetailViewState._onDelete) と同じ文言・挙動。
+  /// 削除後の遷移は不要 (tripListProvider が Stream なので一覧は自動更新)。
+  Future<void> _onDelete(
+    BuildContext context,
+    WidgetRef ref,
+    Trip trip,
+  ) async {
+    final stats =
+        await ref.read(tripRepositoryProvider).collectStats(trip.id);
+    if (!context.mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('旅程を削除しますか？'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('「${trip.title}」を削除すると元に戻せないよ。'),
+            const SizedBox(height: 12),
+            Text(
+              '一緒に削除されるもの:\n'
+              '・Day  ${stats.dayCount} 個\n'
+              '・予定 ${stats.topicCount} 件\n'
+              '・持ち物 ${stats.checklistCount} 件',
+              style: Theme.of(dialogContext).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.coralRed),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('削除する'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!context.mounted) return;
+    await handleAsyncAction(
+      context,
+      () => ref.read(tripRepositoryProvider).delete(trip.id),
+      errorMessage: '旅程を削除できませんでした',
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
       itemCount: trips.length,
@@ -167,8 +302,11 @@ class _HomeTripList extends StatelessWidget {
         return TripCard(
           trip: trip,
           onTap: () => context.push('/trips/${trip.id}'),
+          onLongPress: () => _showTripActions(context, ref, trip),
         );
       },
     );
   }
 }
+
+enum _TripAction { editTitle, delete }
