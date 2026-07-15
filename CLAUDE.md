@@ -173,10 +173,17 @@ PowerShell から:
 ```powershell
 $env:Path = "$env:Path;C:\flutter\bin"  # 現セッションのみ必要 (ユーザー PATH には永続追加済み)
 flutter pub get
+flutter pub run build_runner build --delete-conflicting-outputs  # Drift 生成コード (database.g.dart) を生成
 flutter analyze
 flutter test
 flutter run -d chrome           # Web で動作確認 (Android SDK 無くてもOK)
 flutter build web
+```
+
+**新規 git worktree 作成直後 / 新規クローン直後は要注意**: `database.g.dart` などの Drift 生成コードは `.gitignore` 対象のため、チェックアウト直後には存在せず `flutter analyze` が大量のエラー(`TriplaDatabase` / `TripsCompanion` 等の未定義エラー)を出す。`tool/setup_worktree.ps1`(PowerShell)または `tool/setup_worktree.sh`(Git Bash)を実行すると、`flutter pub get` → 必要な場合のみ build_runner を実行して解消できる(生成済みで最新なら自動でスキップする冪等スクリプト。強制再生成する場合は `-Force` / `--force`)。
+
+```powershell
+pwsh tool/setup_worktree.ps1        # または: bash tool/setup_worktree.sh
 ```
 
 ---
@@ -188,6 +195,7 @@ flutter build web
 - **Windows 開発者モード**: ネイティブプラグインのシンボリックリンク対応のため、Windows 実機ビルド時に有効化が必要 (`start ms-settings:developers`)
 - **Android Studio + Android SDK** / **Visual Studio C++ Workload** は Android / Windows ターゲットビルド時に必要
 - **フォント**: NotoSansJP / Quicksand を `assets/fonts/` に配置し `AppTextTheme` で `fontFamily` を指定
+- **Rapitas 側の worktree 作成フロー(`EnterWorktree`)への組み込み**: `tool/setup_worktree.ps1`(または `.sh`)を新規 worktree 作成時に自動実行するには、Rapitas(`C:\Projects\rapitas` 配下)側の設定変更が別途必要(tripla リポジトリ側の対応はここまでで完了)。手動実行(`pwsh tool/setup_worktree.ps1`)で当座しのぎは可能。
 
 ---
 
