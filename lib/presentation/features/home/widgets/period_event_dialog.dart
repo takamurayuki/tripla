@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../domain/entities/topic.dart';
 import '../../../../domain/entities/topic_category.dart';
 import '../../../providers/current_user_provider.dart';
 import '../../../providers/day_providers.dart';
@@ -34,6 +35,26 @@ Future<void> showPeriodEventDialog({
     context: context,
     builder: (dialogContext) {
       return _PeriodEventDialog(initialStartDate: initStart);
+    },
+  );
+}
+
+/// 既存の期間予定を編集するダイアログ。
+///
+/// 月ビューのピルタップから起動し、 タイトル / メモ / 表示色 の編集と削除を
+/// 同一モーダル内で行う。
+///
+/// 開始日 / 終了日はこのダイアログでは編集しない (日付変更はドラッグ操作が担当。
+/// 月ビューの直感性を損なわないため — 要件の明示指示)。
+Future<void> showPeriodEventEditDialog({
+  required BuildContext context,
+  required WidgetRef ref,
+  required Topic topic,
+}) async {
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      return _PeriodEventEditDialog(topic: topic);
     },
   );
 }
@@ -239,6 +260,217 @@ class _PeriodEventDialogState extends ConsumerState<_PeriodEventDialog> {
         FilledButton(
           onPressed: _saving ? null : _onSave,
           child: Text(_saving ? '保存中...' : '追加'),
+        ),
+      ],
+    );
+  }
+}
+
+class _PeriodEventEditDialog extends ConsumerStatefulWidget {
+  const _PeriodEventEditDialog({required this.topic});
+  final Topic topic;
+
+  @override
+  ConsumerState<_PeriodEventEditDialog> createState() =>
+      _PeriodEventEditDialogState();
+}
+
+class _PeriodEventEditDialogState
+    extends ConsumerState<_PeriodEventEditDialog> {
+  late final TextEditingController _titleController;
+  late final TextEditingController _descriptionController;
+
+  late Color _selectedColor;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.topic.title);
+    _descriptionController =
+        TextEditingController(text: widget.topic.description ?? '');
+    // displayColor は常に非 null (colorHex が無ければ category.color)。
+    // パレット外の色でもそのまま保持し、 選び直さず保存すれば元色を維持する。
+    _selectedColor = widget.topic.displayColor;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onSave() async {
+    final title = _titleController.text.trim();
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('タイトルを入力してください')),
+      );
+      return;
+    }
+    final description = _descriptionController.text.trim();
+    setState(() => _saving = true);
+    try {
+      // copyWith は `?? this.field` で null を「変更なし」と扱うため、
+      // メモを空にした場合に旧値が残ってしまう。
+      // そのため Topic を直接組み立てて、null をそのまま反映する。
+      final ex = widget.topic;
+      final updated = Topic(
+        id: ex.id,
+        dayId: ex.dayId,
+        parentTopicId: ex.parentTopicId,
+        orderIndex: ex.orderIndex,
+        category: ex.category,
+        title: title,
+        description: description.isEmpty ? null : description,
+        startTime: ex.startTime,
+        endTime: ex.endTime,
+        latitude: ex.latitude,
+        longitude: ex.longitude,
+        locationName: ex.locationName,
+        address: ex.address,
+        cost: ex.cost,
+        costCurrency: ex.costCurrency,
+        isCompleted: ex.isCompleted,
+        departure: ex.departure,
+        destination: ex.destination,
+        transportMode: ex.transportMode,
+        altPlans: ex.altPlans,
+        links: ex.links,
+        colorHex: _toHex(_selectedColor),
+        photos: ex.photos,
+        trainTransfers: ex.trainTransfers,
+        createdAt: ex.createdAt,
+        updatedAt: DateTime.now(),
+      );
+      await ref.read(topicRepositoryProvider).update(updated);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('期間予定を更新しました')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存に失敗しました: $error')),
+      );
+    }
+  }
+
+  Future<void> _onDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('期間予定を削除しますか？'),
+        content: Text('「${widget.topic.title}」を削除します。 元に戻せません。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.coralRed),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('削除する'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(topicRepositoryProvider).delete(widget.topic.id);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('期間予定を削除しました')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('削除に失敗しました: $error')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('期間予定を編集'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _titleController,
+              decoration: InputDecoration(
+                labelText: 'タイトル',
+                hintText: '例: 出張 / 旅行 / 学会',
+                suffixIcon: clearSuffixFor(_titleController),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _descriptionController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'メモ',
+                hintText: '補足があれば入力',
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '表示色',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.softGray,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final c in _palette)
+                  _ColorSwatch(
+                    color: c,
+                    selected: c.toARGB32() == _selectedColor.toARGB32(),
+                    onTap: () => setState(() => _selectedColor = c),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _saving ? null : _onDelete,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.coralRed,
+                ),
+                icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                label: const Text('この期間予定を削除'),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _onSave,
+          child: Text(_saving ? '保存中...' : '保存'),
         ),
       ],
     );
