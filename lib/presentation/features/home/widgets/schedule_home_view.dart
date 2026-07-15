@@ -121,35 +121,15 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
     }
   }
 
-  /// 期間予定ピルタップ時: 削除確認ダイアログ。
-  Future<void> _onPeriodEventTap(Topic topic) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('期間予定を削除しますか？'),
-        content: Text('「${topic.title}」を削除します。 元に戻せません。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.coralRed),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('削除する'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await ref.read(topicRepositoryProvider).delete(topic.id);
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('削除に失敗しました: $error')),
-      );
-    }
+  /// 期間予定ピルタップ時: 編集ダイアログ (タイトル / 期間 / 表示色 + 削除)。
+  void _editPeriodEvent(Topic topic) {
+    showPeriodEventDialog(context: context, ref: ref, existing: topic);
+  }
+
+  /// 期間予定ピルの長押し (モバイル) / 右クリック (デスクトップ):
+  /// 編集ダイアログを経由しない削除確認へのショートカット。
+  Future<void> _deletePeriodEvent(Topic topic) async {
+    await confirmDeletePeriodEvent(context: context, ref: ref, topic: topic);
   }
 
   /// schedule singleton (Trip) を idempotent に取得 / 作成。 失敗時は SnackBar 表示。
@@ -258,7 +238,8 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
                 month: DateTime(_focusDate.year, _focusDate.month, 1),
                 topicsByDate: monthTopics,
                 onSelect: _openDate,
-                onPeriodEventTap: _onPeriodEventTap,
+                onPeriodEventTap: _editPeriodEvent,
+                onPeriodEventDelete: _deletePeriodEvent,
               ),
             ),
             Positioned(
@@ -719,12 +700,14 @@ class _MonthGrid extends StatelessWidget {
     required this.topicsByDate,
     required this.onSelect,
     required this.onPeriodEventTap,
+    required this.onPeriodEventDelete,
   });
 
   final DateTime month;
   final Map<DateTime, List<Topic>> topicsByDate;
   final ValueChanged<DateTime> onSelect;
   final ValueChanged<Topic> onPeriodEventTap;
+  final ValueChanged<Topic> onPeriodEventDelete;
 
   int get _leadingBlankCount => month.weekday % 7;
 
@@ -783,6 +766,7 @@ class _MonthGrid extends StatelessWidget {
       topics: topics,
       onTap: () => onSelect(date),
       onPeriodEventTap: onPeriodEventTap,
+      onPeriodEventDelete: onPeriodEventDelete,
     );
   }
 
@@ -840,6 +824,7 @@ class _DayCell extends StatelessWidget {
     required this.topics,
     required this.onTap,
     required this.onPeriodEventTap,
+    required this.onPeriodEventDelete,
   });
 
   final DateTime date;
@@ -847,6 +832,7 @@ class _DayCell extends StatelessWidget {
   final List<Topic> topics;
   final VoidCallback onTap;
   final ValueChanged<Topic> onPeriodEventTap;
+  final ValueChanged<Topic> onPeriodEventDelete;
 
   // ピル / 「+N」 行の実測高さ (font 9 + padding + margin-bottom 1)。
   // フォントメトリクスが変わったら微調整。 余裕を持って整数で固定。
@@ -964,13 +950,16 @@ class _DayCell extends StatelessWidget {
         for (final t in visible)
           Padding(
             padding: const EdgeInsets.only(bottom: 1),
-            // 期間予定ピルは独立 InkWell でタップを横取りし削除確認。
+            // 期間予定ピルは独立 InkWell でタップを横取りし編集ダイアログ。
+            // 長押し (モバイル) / 右クリック (デスクトップ) は削除確認。
             // スポット予定は外側 InkWell (= 該当日の画面遷移) に任せる。
             child: _isPeriodEvent(t)
                 ? Material(
                     color: Colors.transparent,
                     child: InkWell(
                       onTap: () => onPeriodEventTap(t),
+                      onLongPress: () => onPeriodEventDelete(t),
+                      onSecondaryTap: () => onPeriodEventDelete(t),
                       child: _EventPill(
                         topic: t,
                         periodPosition: _periodPosition(t),
