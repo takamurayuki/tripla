@@ -52,6 +52,15 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
     setState(() => _viewMode = m);
   }
 
+  /// 「今日」ボタン: 表示基準日を今日に戻す。viewMode はそのまま
+  /// (月表示中なら今月へ、週なら今週へ、日なら今日へ)。
+  void _goToday() {
+    final now = DateTime.now();
+    setState(() {
+      _focusDate = DateTime(now.year, now.month, now.day);
+    });
+  }
+
   void _shift(int delta) {
     setState(() {
       switch (_viewMode) {
@@ -186,6 +195,7 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
           label: _periodLabel(),
           onPrev: () => _shift(-1),
           onNext: () => _shift(1),
+          onToday: _goToday,
         ),
         Expanded(
           child: _buildBody(trip, days, topicsByDate),
@@ -385,17 +395,21 @@ class _ViewModeSwitcher extends StatelessWidget {
   }
 }
 
-/// 期間ラベル + 前後ナビ ( < ... > )。 mode 共通。
+/// 期間ラベル + 前後ナビ ( < ... > ) + 「今日」 ボタン。 mode 共通。
 class _PeriodNavigator extends StatelessWidget {
   const _PeriodNavigator({
     required this.label,
     required this.onPrev,
     required this.onNext,
+    required this.onToday,
   });
 
   final String label;
   final VoidCallback onPrev;
   final VoidCallback onNext;
+
+  /// 今日を含む期間に戻る。今日表示中に押しても no-op で無害なため常時表示。
+  final VoidCallback onToday;
 
   @override
   Widget build(BuildContext context) {
@@ -417,6 +431,18 @@ class _PeriodNavigator extends StatelessWidget {
                       color: AppColors.triplaTealDark,
                     ),
               ),
+            ),
+          ),
+          TextButton(
+            onPressed: onToday,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.triplaTeal,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
+            child: const Text(
+              '今日',
+              style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
           IconButton(

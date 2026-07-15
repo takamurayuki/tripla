@@ -1130,7 +1130,23 @@ class _TimeRangeRowState extends State<_TimeRangeRow> {
   }
 
   void _onStartChanged() {
+    _autofillEnd();
     if (mounted) setState(() {}); // 終了側の minTime を再評価するため
+  }
+
+  /// 開始時刻が選ばれたとき、終了時刻が未入力なら「開始 + 1 時間」を自動補完する。
+  /// 日跨ぎ入力は現仕様で不可のため 23 時台は 23:59 に丸める。
+  /// 既に終了時刻が入っている場合はユーザー入力を尊重して何もしない。
+  void _autofillEnd() {
+    if (widget.endController.text.trim().isNotEmpty) return;
+    final startT = widget.parseTime(widget.startController.text.trim());
+    if (startT == null) return;
+    final TimeOfDay endT = startT.hour >= 23
+        ? const TimeOfDay(hour: 23, minute: 59)
+        : TimeOfDay(hour: startT.hour + 1, minute: startT.minute);
+    final hh = endT.hour.toString().padLeft(2, '0');
+    final mm = endT.minute.toString().padLeft(2, '0');
+    widget.endController.text = '$hh:$mm';
   }
 
   String? _validateStart(String? value) {
