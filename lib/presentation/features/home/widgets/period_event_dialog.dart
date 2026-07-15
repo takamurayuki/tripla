@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../domain/entities/topic.dart';
 import '../../../../domain/entities/topic_category.dart';
 import '../../../providers/current_user_provider.dart';
 import '../../../providers/day_providers.dart';
@@ -10,7 +11,7 @@ import '../../../providers/topic_providers.dart';
 import '../../../providers/trip_providers.dart';
 import '../../../widgets/common/clearable_input.dart';
 
-/// 期間予定 (日付を跨ぐ予定 — 出張 / 旅行 など) を新規作成するダイアログ。
+/// 期間予定 (日付を跨ぐ予定 — 出張 / 旅行 など) の作成 / 編集ダイアログ。
 ///
 /// 入力:
 /// - タイトル
@@ -20,22 +21,69 @@ import '../../../widgets/common/clearable_input.dart';
 /// カテゴリ / メモは不要 (期間予定はカレンダーで色帯として目立たせるだけ)。
 /// 内部的には category=other で保存し、 色は `colorHex` 列で持つ。
 ///
-/// 保存内容:
+/// 新規作成 ([existing] == null):
 /// - 開始日の Day を `ensureDayForDate` で確保し、 そこへ Topic を作る
 /// - `startTime = 開始日 00:00`, `endTime = 終了日 23:59`
+///
+/// 編集 ([existing] != null):
+/// - タイトル / 開始日 / 終了日 / 表示色を事前入力して開く
+/// - 保存は `TopicRepository.update`。 dayId は付け替えない
+///   (カレンダー表示は startTime / endTime の日付だけを見るため)
+/// - 時刻成分は元の予定から引き継ぐ (日付のみ差し替え)
+/// - ダイアログ内の削除ボタンからも削除できる
 Future<void> showPeriodEventDialog({
   required BuildContext context,
   required WidgetRef ref,
   DateTime? initialStartDate,
+  Topic? existing,
 }) async {
   final today = DateTime.now();
   final initStart = initialStartDate ?? DateTime(today.year, today.month, today.day);
   await showDialog<void>(
     context: context,
     builder: (dialogContext) {
-      return _PeriodEventDialog(initialStartDate: initStart);
+      return _PeriodEventDialog(initialStartDate: initStart, existing: existing);
     },
   );
+}
+
+/// 期間予定の削除確認 → 削除。 実際に削除したら true を返す。
+/// 月ビューのピル長押し / 右クリックと、 編集ダイアログの削除ボタンから共用する。
+Future<bool> confirmDeletePeriodEvent({
+  required BuildContext context,
+  required WidgetRef ref,
+  required Topic topic,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('期間予定を削除しますか？'),
+      content: Text('「${topic.title}」を削除します。 元に戻せません。'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.coralRed),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('削除する'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return false;
+  try {
+    await ref.read(topicRepositoryProvider).delete(topic.id);
+    return true;
+  } catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('削除に失敗しました: $error')),
+      );
+    }
+    return false;
+  }
 }
 
 /// 期間予定で選択できる色パレット。
@@ -63,8 +111,11 @@ String _toHex(Color c) {
 }
 
 class _PeriodEventDialog extends ConsumerStatefulWidget {
-  const _PeriodEventDialog({required this.initialStartDate});
+  const _PeriodEventDialog({required this.initialStartDate, this.existing});
   final DateTime initialStartDate;
+
+  /// 編集対象の期間予定。 null なら新規作成モード。
+  final Topic? existing;
 
   @override
   ConsumerState<_PeriodEventDialog> createState() =>
@@ -81,11 +132,23 @@ class _PeriodEventDialogState extends ConsumerState<_PeriodEventDialog> {
 
   static final _dateFmt = DateFormat('yyyy/M/d (E)', 'ja');
 
+  bool get _isEdit => widget.existing != null;
+
   @override
   void initState() {
     super.initState();
-    _startDate = widget.initialStartDate;
-    _endDate = _startDate.add(const Duration(days: 1));
+    final existing = widget.existing;
+    if (existing != null) {
+      _titleController.text = existing.title;
+      final s = existing.startTime!;
+      final e = existing.endTime!;
+      _startDate = DateTime(s.year, s.month, s.day);
+      _endDate = DateTime(e.year, e.month, e.day);
+      _selectedColor = existing.displayColor;
+    } else {
+      _startDate = widget.initialStartDate;
+      _endDate = _startDate.add(const Duration(days: 1));
+    }
   }
 
   @override
@@ -104,16 +167,29 @@ class _PeriodEventDialogState extends ConsumerState<_PeriodEventDialog> {
     if (picked != null) {
       setState(() {
         _startDate = DateTime(picked.year, picked.month, picked.day);
-        if (_endDate.isBefore(_startDate)) _endDate = _startDate;
+        if (_isEdit) {
+          // 編集では期間予定 (2 日以上) を維持する。
+          // 1 日に縮めると帯からスポット予定に変わり、 dayId の日付と
+          // startTime の日付がズレて表示日が食い違うため許可しない。
+          if (!_endDate.isAfter(_startDate)) {
+            _endDate = _startDate.add(const Duration(days: 1));
+          }
+        } else if (_endDate.isBefore(_startDate)) {
+          _endDate = _startDate;
+        }
       });
     }
   }
 
   Future<void> _pickEnd() async {
+    // 編集では期間予定のまま維持するため終了日は開始日の翌日以降。
+    final firstSelectable =
+        _isEdit ? _startDate.add(const Duration(days: 1)) : _startDate;
     final picked = await showDatePicker(
       context: context,
-      initialDate: _endDate.isBefore(_startDate) ? _startDate : _endDate,
-      firstDate: _startDate,
+      initialDate:
+          _endDate.isBefore(firstSelectable) ? firstSelectable : _endDate,
+      firstDate: firstSelectable,
       lastDate: DateTime(_startDate.year + 5),
     );
     if (picked != null) {
@@ -131,36 +207,62 @@ class _PeriodEventDialogState extends ConsumerState<_PeriodEventDialog> {
       );
       return;
     }
-    if (_endDate.isBefore(_startDate)) {
+    final existing = widget.existing;
+    if (existing == null && _endDate.isBefore(_startDate)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('終了日は開始日以降にしてください')),
       );
       return;
     }
+    if (existing != null && !_endDate.isAfter(_startDate)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('終了日は開始日の翌日以降にしてください')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
-      final ownerId = ref.read(currentUserIdProvider);
-      final trip =
-          await ref.read(tripRepositoryProvider).getOrCreateSchedule(ownerId);
-      final day = await ref
-          .read(dayRepositoryProvider)
-          .ensureDayForDate(tripId: trip.id, date: _startDate);
-      final startDT = DateTime(
-          _startDate.year, _startDate.month, _startDate.day, 0, 0);
-      final endDT =
-          DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59);
-      await ref.read(topicRepositoryProvider).create(
-            dayId: day.id,
-            category: TopicCategory.other,
-            title: title,
-            startTime: startDT,
-            endTime: endDT,
-            colorHex: _toHex(_selectedColor),
-          );
+      if (existing != null) {
+        // 日付だけ差し替え、 時刻成分は元の予定から引き継ぐ
+        // (ダイアログ作成なら 00:00 / 23:59、 トピック編集経由なら任意時刻)。
+        final s = existing.startTime!;
+        final e = existing.endTime!;
+        await ref.read(topicRepositoryProvider).update(
+              existing.copyWith(
+                title: title,
+                startTime: DateTime(_startDate.year, _startDate.month,
+                    _startDate.day, s.hour, s.minute),
+                endTime: DateTime(
+                    _endDate.year, _endDate.month, _endDate.day, e.hour, e.minute),
+                colorHex: _toHex(_selectedColor),
+              ),
+            );
+      } else {
+        final ownerId = ref.read(currentUserIdProvider);
+        final trip =
+            await ref.read(tripRepositoryProvider).getOrCreateSchedule(ownerId);
+        final day = await ref
+            .read(dayRepositoryProvider)
+            .ensureDayForDate(tripId: trip.id, date: _startDate);
+        final startDT = DateTime(
+            _startDate.year, _startDate.month, _startDate.day, 0, 0);
+        final endDT =
+            DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59);
+        await ref.read(topicRepositoryProvider).create(
+              dayId: day.id,
+              category: TopicCategory.other,
+              title: title,
+              startTime: startDT,
+              endTime: endDT,
+              colorHex: _toHex(_selectedColor),
+            );
+      }
       if (!mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('期間予定を追加しました')),
+        SnackBar(
+          content: Text(existing != null ? '期間予定を更新しました' : '期間予定を追加しました'),
+        ),
       );
     } catch (error) {
       if (!mounted) return;
@@ -171,10 +273,30 @@ class _PeriodEventDialogState extends ConsumerState<_PeriodEventDialog> {
     }
   }
 
+  /// 編集モードのみ: 削除確認 → 削除に成功したらこのダイアログも閉じる。
+  Future<void> _onDelete() async {
+    final existing = widget.existing!;
+    setState(() => _saving = true);
+    final deleted = await confirmDeletePeriodEvent(
+      context: context,
+      ref: ref,
+      topic: existing,
+    );
+    if (!mounted) return;
+    if (!deleted) {
+      setState(() => _saving = false);
+      return;
+    }
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('期間予定を削除しました')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('期間予定を追加'),
+      title: Text(_isEdit ? '期間予定を編集' : '期間予定を追加'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -232,13 +354,19 @@ class _PeriodEventDialogState extends ConsumerState<_PeriodEventDialog> {
         ),
       ),
       actions: [
+        if (_isEdit)
+          TextButton(
+            onPressed: _saving ? null : _onDelete,
+            style: TextButton.styleFrom(foregroundColor: AppColors.coralRed),
+            child: const Text('削除'),
+          ),
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
           child: const Text('キャンセル'),
         ),
         FilledButton(
           onPressed: _saving ? null : _onSave,
-          child: Text(_saving ? '保存中...' : '追加'),
+          child: Text(_saving ? '保存中...' : (_isEdit ? '保存' : '追加')),
         ),
       ],
     );

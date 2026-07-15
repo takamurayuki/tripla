@@ -129,6 +129,36 @@ void main() {
       expect(updated.altPlans.map((p) => p.id), ['p1', 'p2']);
     });
 
+    test('update で期間予定のタイトル / 期間 / 表示色を変更できる', () async {
+      final id = await topicRepo.create(
+        dayId: dayId,
+        category: TopicCategory.other,
+        title: '出張',
+        startTime: DateTime(2026, 1, 1, 0, 0),
+        endTime: DateTime(2026, 1, 3, 23, 59),
+        colorHex: '#00A6A6',
+      );
+      final created = (await topicRepo.watchById(id).first)!;
+      expect(created.isPeriodEvent, isTrue);
+
+      // 月ビューの編集ダイアログ相当: 日付を差し替え時刻成分は引き継ぐ
+      await topicRepo.update(created.copyWith(
+        title: '大阪出張',
+        startTime: DateTime(2026, 1, 2, 0, 0),
+        endTime: DateTime(2026, 1, 5, 23, 59),
+        colorHex: '#E7669C',
+      ));
+
+      final updated = (await topicRepo.watchById(id).first)!;
+      expect(updated.title, '大阪出張');
+      expect(updated.startTime, DateTime(2026, 1, 2, 0, 0));
+      expect(updated.endTime, DateTime(2026, 1, 5, 23, 59));
+      expect(updated.colorHex, '#E7669C');
+      expect(updated.isPeriodEvent, isTrue);
+      // dayId は再アンカーしない (カレンダーは startTime/endTime の日付で表示)
+      expect(updated.dayId, created.dayId);
+    });
+
     test('delete は子の parentTopicId を NULL に戻す', () async {
       final parent = await topicRepo.create(
           dayId: dayId, category: TopicCategory.other, title: 'P');
