@@ -202,7 +202,17 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: 8),
+            // タイトル右横のペンアイコンでタイトル編集。
+            IconButton(
+              icon: const Icon(Icons.edit_rounded,
+                  size: 18, color: AppColors.softGray),
+              tooltip: 'タイトルを編集',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: _onEditTitle,
+            ),
+            const SizedBox(width: 4),
             TripPeriodChip(trip: trip),
           ],
         ),
@@ -211,38 +221,11 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView> {
           // 出発カウントダウン (元 TripHeaderCard 相当)。 ロック button のすぐ左に置く。
           TripCountdownBadge(trip: trip),
           _TripLockButton(trip: trip),
-          PopupMenuButton<_MenuAction>(
-            icon: const Icon(Icons.more_horiz),
-            onSelected: (action) {
-              switch (action) {
-                case _MenuAction.editTitle:
-                  _onEditTitle();
-                case _MenuAction.delete:
-                  _onDelete();
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: _MenuAction.editTitle,
-                child: ListTile(
-                  leading: Icon(Icons.edit_rounded),
-                  title: Text('タイトルを編集'),
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              PopupMenuItem(
-                value: _MenuAction.delete,
-                child: ListTile(
-                  leading: Icon(Icons.delete_outline_rounded,
-                      color: AppColors.coralRed),
-                  title: Text('旅程を削除',
-                      style: TextStyle(color: AppColors.coralRed)),
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-            ],
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded,
+                color: AppColors.coralRed),
+            tooltip: '旅程を削除',
+            onPressed: _onDelete,
           ),
         ],
       ),
@@ -326,8 +309,6 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView> {
     }
   }
 }
-
-enum _MenuAction { editTitle, delete }
 
 /// 上位 TabBar 右端に置く Trip 一括ロックボタン。
 /// トリ太の盾アイコンで「全体を保護」のメタファー。
