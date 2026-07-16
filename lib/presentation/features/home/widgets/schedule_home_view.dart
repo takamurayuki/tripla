@@ -121,35 +121,10 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
     }
   }
 
-  /// 期間予定ピルタップ時: 削除確認ダイアログ。
+  /// 期間予定ピルタップ時: 編集ダイアログ (タイトル / メモ / 色の編集 + 削除)。
+  /// 削除確認はダイアログ内の削除ボタンから行う。
   Future<void> _onPeriodEventTap(Topic topic) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('期間予定を削除しますか？'),
-        content: Text('「${topic.title}」を削除します。 元に戻せません。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.coralRed),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('削除する'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await ref.read(topicRepositoryProvider).delete(topic.id);
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('削除に失敗しました: $error')),
-      );
-    }
+    await showPeriodEventEditDialog(context: context, ref: ref, topic: topic);
   }
 
   /// schedule singleton (Trip) を idempotent に取得 / 作成。 失敗時は SnackBar 表示。
