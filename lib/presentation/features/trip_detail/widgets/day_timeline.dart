@@ -6,12 +6,14 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/handle_async_action.dart';
 import '../../../../domain/entities/day.dart';
 import '../../../../domain/entities/topic.dart';
+import '../../../../domain/entities/topic_actual_status.dart';
 import '../../../../domain/entities/trip_mode.dart';
 import '../../../providers/day_providers.dart';
 import '../../../providers/topic_providers.dart';
 import '../../../widgets/trita/trita_speech_bubble.dart';
 import '../../../widgets/trita/trita_state.dart';
 import '../../../widgets/trita/trita_widget.dart';
+import 'actual_record_sheet.dart';
 import 'topic_editor_sheet.dart';
 import 'topic_tile.dart';
 
@@ -393,6 +395,28 @@ class _TopicGroupTile extends ConsumerWidget {
     );
   }
 
+  /// カードの右上バッジ。
+  ///
+  /// plan モードのみ実績バッジ (タップで [showActualRecordSheet]) を所要時間バッジの上に重ねる。
+  /// schedule モード / 期間予定 (isPeriodEvent) では所要時間バッジのみ (実績記録の対象外)。
+  Widget _buildTrailing(BuildContext context, Topic topic) {
+    if (!tripMode.isPlan || topic.isPeriodEvent) {
+      return _DurationBadge(topic: topic);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ActualStatusBadge(
+          topic: topic,
+          onTap: () => showActualRecordSheet(context: context, topic: topic),
+        ),
+        const SizedBox(height: 4),
+        _DurationBadge(topic: topic),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final parent = group.parent;
@@ -420,7 +444,7 @@ class _TopicGroupTile extends ConsumerWidget {
                 size: 18,
               ),
             ),
-      trailing: _DurationBadge(topic: parent),
+      trailing: _buildTrailing(context, parent),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -446,7 +470,7 @@ class _TopicGroupTile extends ConsumerWidget {
             // 末尾グループの最後の子のみ下端
             isTimelineBottom: isLastGroup && i == lastChildIndex,
             onTap: isLocked ? null : () => _openEdit(context, children[i]),
-            trailing: _DurationBadge(topic: children[i]),
+            trailing: _buildTrailing(context, children[i]),
           ),
         // この group の直後 (次の group との間) に + を出す。
         // ただし最後の group のあとには出さない / ロック中も出さない。
@@ -502,6 +526,78 @@ class _DurationBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 実績記録の状態を示す小さなバッジ。 タップで [showActualRecordSheet] を開く。
+///
+/// - 未記録: 薄いアウトラインの丸アイコンのみ。
+/// - 記録済み かつ 遅延あり (`isDelayedStart`): 「+N分」 をオレンジで表示。
+/// - 記録済み かつ 遅延なし: 「予定通り」 を緑で表示。
+/// - スキップ / 変更して実施: それぞれの色でラベル表示。
+class _ActualStatusBadge extends StatelessWidget {
+  const _ActualStatusBadge({required this.topic, required this.onTap});
+
+  final Topic topic;
+  final VoidCallback onTap;
+
+  (IconData, String, Color) _presentation() {
+    switch (topic.actualStatus) {
+      case TopicActualStatus.notRecorded:
+        return (Icons.radio_button_unchecked_rounded, '記録', AppColors.softGray);
+      case TopicActualStatus.skipped:
+        return (Icons.cancel_rounded, 'スキップ', AppColors.coralRed);
+      case TopicActualStatus.changed:
+        return (Icons.edit_note_rounded, '変更', AppColors.warmOrange);
+      case TopicActualStatus.recorded:
+        if (topic.isDelayedStart) {
+          return (
+            Icons.schedule_rounded,
+            '+${topic.actualStartDelayMinutes}分',
+            AppColors.warmOrange,
+          );
+        }
+        return (Icons.check_circle_rounded, '予定通り', AppColors.bandanaGreen);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, label, color) = _presentation();
+    final recorded = topic.hasActualRecord;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: recorded ? 0.15 : 0.06),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: color.withValues(alpha: recorded ? 0.5 : 0.3),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 11, color: color),
+              const SizedBox(width: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

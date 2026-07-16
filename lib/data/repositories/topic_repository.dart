@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../domain/entities/topic.dart';
+import '../../domain/entities/topic_actual_status.dart';
 import '../../domain/entities/topic_alt_plan.dart';
 import '../../domain/entities/topic_category.dart';
 import '../../domain/entities/topic_link.dart';
@@ -193,6 +194,10 @@ class TopicRepository {
       colorHex: row.colorHex,
       photos: _decodePhotos(row.photos),
       trainTransfers: _decodeTransfers(row.trainTransfers),
+      actualStartTime: row.actualStartTime,
+      actualEndTime: row.actualEndTime,
+      actualStatus: _parseActualStatus(row.actualStatus),
+      actualNote: row.actualNote,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     );
@@ -224,6 +229,10 @@ class TopicRepository {
       colorHex: Value(t.colorHex),
       photos: Value(_encodePhotos(t.photos)),
       trainTransfers: Value(_encodeTransfers(t.trainTransfers)),
+      actualStartTime: Value(t.actualStartTime),
+      actualEndTime: Value(t.actualEndTime),
+      actualStatus: Value(t.actualStatus.name),
+      actualNote: Value(t.actualNote),
       createdAt: Value(t.createdAt),
       updatedAt: Value(t.updatedAt),
     );
@@ -308,5 +317,12 @@ class TopicRepository {
       if (mode.name == name) return mode;
     }
     return null;
+  }
+
+  TopicActualStatus _parseActualStatus(String name) {
+    return TopicActualStatus.values.firstWhere(
+      (s) => s.name == name,
+      orElse: () => TopicActualStatus.notRecorded,
+    );
   }
 }
