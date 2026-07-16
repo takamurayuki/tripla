@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
+import 'topic_actual_status.dart';
 import 'topic_alt_plan.dart';
 import 'topic_category.dart';
 import 'topic_link.dart';
@@ -8,6 +9,10 @@ import 'train_transfer.dart';
 import 'transport_mode.dart';
 
 /// 要件定義書 §6.1 Topic エンティティ + Location をフラット化 + 移動情報。
+///
+/// フィールド追加時は `topic_editor_sheet.dart` / `period_event_dialog.dart` の
+/// `_onSave()` にある `Topic(...)` 直接構築箇所 (null クリアのため copyWith を
+/// 使わない) にも新フィールドを引き継がせないと、既存編集のたびに値が消える。
 @immutable
 class Topic {
   Topic({
@@ -35,6 +40,10 @@ class Topic {
     this.colorHex,
     this.photos = const [],
     this.trainTransfers = const [],
+    this.actualStartTime,
+    this.actualEndTime,
+    this.actualStatus = TopicActualStatus.notRecorded,
+    this.actualNote,
     required this.createdAt,
     required this.updatedAt,
   })  : assert(title.trim().isNotEmpty, 'title must not be empty'),
@@ -42,6 +51,12 @@ class Topic {
         assert(
           startTime == null || endTime == null || !startTime.isAfter(endTime),
           'startTime must be on or before endTime',
+        ),
+        assert(
+          actualStartTime == null ||
+              actualEndTime == null ||
+              !actualStartTime.isAfter(actualEndTime),
+          'actualStartTime must be on or before actualEndTime',
         );
 
   final String id;
@@ -91,6 +106,18 @@ class Topic {
   /// 移動カテゴリ + transportMode=train 以外でも持てるが、 UI 上は train だけで編集表示する。
   final List<TrainTransfer> trainTransfers;
 
+  /// 実際に開始した時刻。 null なら未記録。
+  final DateTime? actualStartTime;
+
+  /// 実際に終了した時刻。 null なら未記録。
+  final DateTime? actualEndTime;
+
+  /// 実績ステータス。
+  final TopicActualStatus actualStatus;
+
+  /// 実績メモ (遅延理由・変更内容など)。
+  final String? actualNote;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -99,6 +126,22 @@ class Topic {
   bool get hasLocation => latitude != null && longitude != null;
   bool get hasCost => cost != null;
   bool get isTransport => category == TopicCategory.transport;
+
+  /// 実績が何かしら記録されているか (notRecorded 以外)。
+  bool get hasActualRecord => actualStatus != TopicActualStatus.notRecorded;
+
+  /// 計画開始時刻に対する実績開始時刻の差分 (分)。 プラスが遅延、マイナスが前倒し。
+  /// 計画/実績いずれかの開始時刻が無ければ計算不能 (null)。
+  int? get actualStartDelayMinutes {
+    if (startTime == null || actualStartTime == null) return null;
+    return actualStartTime!.difference(startTime!).inMinutes;
+  }
+
+  /// この分数以内の差分は「予定通り」として扱う許容範囲。
+  static const int delayToleranceMinutes = 5;
+
+  /// 実績開始時刻が許容範囲を超えて遅延しているか。
+  bool get isDelayedStart => (actualStartDelayMinutes ?? 0) > delayToleranceMinutes;
 
   /// startTime / endTime の日付が異なる「期間予定」 (出張 / 旅行 など) か。
   /// schedule モードのカレンダーで横断バー扱いし、 日ごとのタイムラインには出さない。
@@ -151,6 +194,10 @@ class Topic {
     String? colorHex,
     List<String>? photos,
     List<TrainTransfer>? trainTransfers,
+    DateTime? actualStartTime,
+    DateTime? actualEndTime,
+    TopicActualStatus? actualStatus,
+    String? actualNote,
     DateTime? updatedAt,
   }) {
     return Topic(
@@ -178,6 +225,10 @@ class Topic {
       colorHex: colorHex ?? this.colorHex,
       photos: photos ?? this.photos,
       trainTransfers: trainTransfers ?? this.trainTransfers,
+      actualStartTime: actualStartTime ?? this.actualStartTime,
+      actualEndTime: actualEndTime ?? this.actualEndTime,
+      actualStatus: actualStatus ?? this.actualStatus,
+      actualNote: actualNote ?? this.actualNote,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

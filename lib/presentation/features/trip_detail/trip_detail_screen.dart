@@ -19,6 +19,7 @@ import 'widgets/dashboard_tab_view.dart';
 import 'widgets/expense_tab_view.dart';
 import 'widgets/member_tab_view.dart';
 import 'widgets/plan_tab_view.dart';
+import 'widgets/review_tab_view.dart';
 import 'widgets/topic_editor_sheet.dart';
 import 'widgets/trip_header_card.dart';
 import 'widgets/trip_title_edit_dialog.dart';
@@ -90,7 +91,8 @@ enum _OuterTab {
   plan('予定', Icons.event_note_rounded),
   checklist('持ち物', Icons.luggage_rounded),
   expense('費用', Icons.payments_rounded),
-  member('メンバー', Icons.group_rounded);
+  member('メンバー', Icons.group_rounded),
+  review('振り返り', Icons.insights_rounded);
 
   const _OuterTab(this.label, this.icon);
   final String label;
@@ -237,6 +239,7 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView> {
           ChecklistTabView(tripId: trip.id),
           const ExpenseTabView(),
           const MemberTabView(),
+          ReviewTabView(trip: trip),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -305,6 +308,8 @@ class _TripDetailViewState extends ConsumerState<_TripDetailView> {
       case _OuterTab.expense:
         return null;
       case _OuterTab.member:
+        return null;
+      case _OuterTab.review:
         return null;
     }
   }

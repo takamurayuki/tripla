@@ -49,6 +49,27 @@ void main() {
       expect(after.isLocked, isTrue);
     });
 
+    test('setNote で Day.note が永続化・null クリアされる', () async {
+      final id = await tripRepo.create(
+        ownerId: 'u1',
+        title: 't',
+        startDate: DateTime(2026, 5, 1),
+        endDate: DateTime(2026, 5, 1),
+      );
+      final trip = (await tripRepo.getById(id))!;
+      await dayRepo.ensureDaysForTrip(trip);
+      final day = (await dayRepo.watchByTrip(id).first).first;
+      expect(day.note, isNull);
+
+      await dayRepo.setNote(day.id, '電車遅延に注意');
+      final withNote = (await dayRepo.watchByTrip(id).first).first;
+      expect(withNote.note, '電車遅延に注意');
+
+      await dayRepo.setNote(day.id, null);
+      final cleared = (await dayRepo.watchByTrip(id).first).first;
+      expect(cleared.note, isNull);
+    });
+
     test('再呼び出ししても件数が増えない (idempotent)', () async {
       final id = await tripRepo.create(
         ownerId: 'u1',

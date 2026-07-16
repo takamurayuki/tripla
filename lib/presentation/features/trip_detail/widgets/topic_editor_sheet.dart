@@ -392,6 +392,10 @@ class _TopicEditorSheetState extends ConsumerState<_TopicEditorSheet> {
           links: _links,
           photos: _photos,
           trainTransfers: _trainTransfers,
+          actualStartTime: ex.actualStartTime,
+          actualEndTime: ex.actualEndTime,
+          actualStatus: ex.actualStatus,
+          actualNote: ex.actualNote,
           createdAt: ex.createdAt,
           updatedAt: DateTime.now(),
         );

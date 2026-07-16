@@ -123,6 +123,22 @@ class Topics extends Table {
   TextColumn get trainTransfers =>
       text().named('train_transfers').nullable()();
 
+  /// 実際に開始した時刻。null なら未記録。
+  DateTimeColumn get actualStartTime =>
+      dateTime().named('actual_start_time').nullable()();
+
+  /// 実際に終了した時刻。null なら未記録。
+  DateTimeColumn get actualEndTime =>
+      dateTime().named('actual_end_time').nullable()();
+
+  /// 実績ステータス (TopicActualStatus.name)。
+  TextColumn get actualStatus => text()
+      .named('actual_status')
+      .withDefault(const Constant('notRecorded'))();
+
+  /// 実績メモ (遅延理由・変更内容など)。
+  TextColumn get actualNote => text().named('actual_note').nullable()();
+
   DateTimeColumn get createdAt => dateTime().named('created_at')();
   DateTimeColumn get updatedAt => dateTime().named('updated_at')();
 
@@ -170,7 +186,7 @@ class TriplaDatabase extends _$TriplaDatabase {
   TriplaDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -247,6 +263,16 @@ class TriplaDatabase extends _$TriplaDatabase {
           }
           if (from < 13) {
             await m.addColumn(topics, topics.trainTransfers);
+          }
+          if (from < 14) {
+            await m.addColumn(topics, topics.actualStartTime);
+            await m.addColumn(topics, topics.actualEndTime);
+            await m.addColumn(topics, topics.actualStatus);
+            await m.addColumn(topics, topics.actualNote);
+            await customStatement(
+              "UPDATE topics SET actual_status = 'notRecorded' "
+              'WHERE actual_status IS NULL',
+            );
           }
         },
       );

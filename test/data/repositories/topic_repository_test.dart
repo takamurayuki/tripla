@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tripla/data/repositories/day_repository.dart';
 import 'package:tripla/data/repositories/topic_repository.dart';
 import 'package:tripla/data/repositories/trip_repository.dart';
+import 'package:tripla/domain/entities/topic.dart';
+import 'package:tripla/domain/entities/topic_actual_status.dart';
 import 'package:tripla/domain/entities/topic_alt_plan.dart';
 import 'package:tripla/domain/entities/topic_category.dart';
 import 'package:tripla/domain/entities/transport_mode.dart';
@@ -127,6 +129,100 @@ void main() {
           .firstWhere((t) => t.id == id);
       expect(updated.altPlans, hasLength(2));
       expect(updated.altPlans.map((p) => p.id), ['p1', 'p2']);
+    });
+
+    test('update で実績 (actualStartTime/actualEndTime/actualStatus/actualNote) '
+        'が永続化・復元される', () async {
+      final id = await topicRepo.create(
+        dayId: dayId,
+        category: TopicCategory.sightseeing,
+        title: '観光',
+        startTime: DateTime(2026, 5, 14, 9, 0),
+        endTime: DateTime(2026, 5, 14, 10, 0),
+      );
+      final created =
+          (await topicRepo.watchByDay(dayId).first).firstWhere((t) => t.id == id);
+      expect(created.hasActualRecord, isFalse);
+
+      await topicRepo.update(created.copyWith(
+        actualStartTime: DateTime(2026, 5, 14, 9, 20),
+        actualEndTime: DateTime(2026, 5, 14, 10, 5),
+        actualStatus: TopicActualStatus.recorded,
+        actualNote: '電車遅延で20分遅れ',
+      ));
+
+      final updated =
+          (await topicRepo.watchByDay(dayId).first).firstWhere((t) => t.id == id);
+      expect(updated.hasActualRecord, isTrue);
+      expect(updated.actualStartTime, DateTime(2026, 5, 14, 9, 20));
+      expect(updated.actualEndTime, DateTime(2026, 5, 14, 10, 5));
+      expect(updated.actualStatus, TopicActualStatus.recorded);
+      expect(updated.actualNote, '電車遅延で20分遅れ');
+      expect(updated.actualStartDelayMinutes, 20);
+      expect(updated.isDelayedStart, isTrue);
+    });
+
+    test('スキップ操作 (直接 Topic(...) 構築) で実績が null クリアされる', () async {
+      final id = await topicRepo.create(
+        dayId: dayId,
+        category: TopicCategory.meal,
+        title: '食事',
+        startTime: DateTime(2026, 5, 14, 12, 0),
+        endTime: DateTime(2026, 5, 14, 13, 0),
+      );
+      final created =
+          (await topicRepo.watchByDay(dayId).first).firstWhere((t) => t.id == id);
+      await topicRepo.update(created.copyWith(
+        actualStartTime: DateTime(2026, 5, 14, 12, 0),
+        actualEndTime: DateTime(2026, 5, 14, 13, 0),
+        actualStatus: TopicActualStatus.recorded,
+        actualNote: 'メモ',
+      ));
+      final recorded =
+          (await topicRepo.watchByDay(dayId).first).firstWhere((t) => t.id == id);
+      expect(recorded.hasActualRecord, isTrue);
+
+      // スキップ操作: copyWith では null に戻せないため Topic(...) を直接構築する
+      final skipped = Topic(
+        id: recorded.id,
+        dayId: recorded.dayId,
+        parentTopicId: recorded.parentTopicId,
+        orderIndex: recorded.orderIndex,
+        category: recorded.category,
+        title: recorded.title,
+        description: recorded.description,
+        startTime: recorded.startTime,
+        endTime: recorded.endTime,
+        latitude: recorded.latitude,
+        longitude: recorded.longitude,
+        locationName: recorded.locationName,
+        address: recorded.address,
+        cost: recorded.cost,
+        costCurrency: recorded.costCurrency,
+        isCompleted: recorded.isCompleted,
+        departure: recorded.departure,
+        destination: recorded.destination,
+        transportMode: recorded.transportMode,
+        altPlans: recorded.altPlans,
+        links: recorded.links,
+        colorHex: recorded.colorHex,
+        photos: recorded.photos,
+        trainTransfers: recorded.trainTransfers,
+        actualStartTime: null,
+        actualEndTime: null,
+        actualStatus: TopicActualStatus.skipped,
+        actualNote: recorded.actualNote,
+        createdAt: recorded.createdAt,
+        updatedAt: recorded.updatedAt,
+      );
+      await topicRepo.update(skipped);
+
+      final result =
+          (await topicRepo.watchByDay(dayId).first).firstWhere((t) => t.id == id);
+      expect(result.actualStartTime, isNull);
+      expect(result.actualEndTime, isNull);
+      expect(result.actualStatus, TopicActualStatus.skipped);
+      expect(result.actualNote, 'メモ');
     });
 
     test('delete は子の parentTopicId を NULL に戻す', () async {
