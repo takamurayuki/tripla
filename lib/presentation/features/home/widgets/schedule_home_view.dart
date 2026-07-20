@@ -11,10 +11,12 @@ import '../../../../domain/entities/trip.dart';
 import '../../../../domain/entities/trip_mode.dart';
 import '../../../providers/current_user_provider.dart';
 import '../../../providers/day_providers.dart';
+import '../../../providers/month_view_display_provider.dart';
 import '../../../providers/topic_providers.dart';
 import '../../../providers/trip_providers.dart';
 import '../../trip_detail/widgets/day_timeline.dart';
 import '../../trip_detail/widgets/topic_editor_sheet.dart';
+import 'month_bar_layout.dart';
 import 'period_event_dialog.dart';
 
 /// ホーム画面 [スケジュール] モード時の表示。
@@ -160,6 +162,12 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
     // 日付 → Topic 群 のインデックス
     final topicsByDate = _groupTopicsByDate(topics, days);
 
+    // 連続バー表示の対象: 全日予定 (= 期間予定)。 移動カテゴリは月ビュー対象外。
+    // per-day に束ねる前の生リストを使う (バー描画は生の startTime/endTime が必要)。
+    final periodEvents = topics
+        .where((t) => t.isPeriodEvent && !t.isTransport)
+        .toList(growable: false);
+
     return Column(
       children: [
         _ViewModeSwitcher(
@@ -171,9 +179,12 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
           onPrev: () => _shift(-1),
           onNext: () => _shift(1),
           onToday: _goToday,
+          trailing: _viewMode == _ViewMode.month
+              ? const _MonthDisplayModeToggle()
+              : null,
         ),
         Expanded(
-          child: _buildBody(trip, days, topicsByDate),
+          child: _buildBody(trip, days, topicsByDate, periodEvents),
         ),
       ],
     );
@@ -193,6 +204,7 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
     Trip? trip,
     List<Day> days,
     Map<DateTime, List<Topic>> topicsByDate,
+    List<Topic> periodEvents,
   ) {
     switch (_viewMode) {
       case _ViewMode.day:
@@ -232,6 +244,8 @@ class _ScheduleHomeViewState extends ConsumerState<ScheduleHomeView> {
               child: _MonthGrid(
                 month: DateTime(_focusDate.year, _focusDate.month, 1),
                 topicsByDate: monthTopics,
+                periodEvents: periodEvents,
+                displayMode: ref.watch(monthEventDisplayModeProvider),
                 onSelect: _openDate,
                 onPeriodEventTap: _onPeriodEventTap,
               ),
@@ -377,6 +391,7 @@ class _PeriodNavigator extends StatelessWidget {
     required this.onPrev,
     required this.onNext,
     required this.onToday,
+    this.trailing,
   });
 
   final String label;
@@ -385,6 +400,9 @@ class _PeriodNavigator extends StatelessWidget {
 
   /// 今日を含む期間に戻る。今日表示中に押しても no-op で無害なため常時表示。
   final VoidCallback onToday;
+
+  /// 右端の任意スロット (月モードの表示モード切替ボタンなど)。 null なら非表示。
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -425,8 +443,33 @@ class _PeriodNavigator extends StatelessWidget {
             onPressed: onNext,
             tooltip: '次へ',
           ),
+          ?trailing,
         ],
       ),
+    );
+  }
+}
+
+/// 月ビューの期間予定表示モード (連続バー / 旧ピル) 切替ボタン。
+/// 月モードの _PeriodNavigator 右端に置く。
+class _MonthDisplayModeToggle extends ConsumerWidget {
+  const _MonthDisplayModeToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(monthEventDisplayModeProvider);
+    final isBar = mode == MonthEventDisplayMode.bar;
+    return IconButton(
+      icon: Icon(
+        isBar ? Icons.view_agenda_outlined : Icons.calendar_view_week_rounded,
+        color: AppColors.triplaTealDark,
+      ),
+      tooltip: isBar ? '旧ピル表示に切り替え' : '連続バー表示に切り替え',
+      onPressed: () {
+        ref.read(monthEventDisplayModeProvider.notifier).state = isBar
+            ? MonthEventDisplayMode.legacyPill
+            : MonthEventDisplayMode.bar;
+      },
     );
   }
 }
@@ -692,14 +735,29 @@ class _MonthGrid extends StatelessWidget {
   const _MonthGrid({
     required this.month,
     required this.topicsByDate,
+    required this.periodEvents,
+    required this.displayMode,
     required this.onSelect,
     required this.onPeriodEventTap,
   });
 
   final DateTime month;
   final Map<DateTime, List<Topic>> topicsByDate;
+
+  /// 連続バー表示の対象 (全日予定 = isPeriodEvent、 移動カテゴリ除外済み)。
+  final List<Topic> periodEvents;
+
+  /// 期間予定の表示モード。 320px 以下では bar 指定でも legacyPill に落とす。
+  final MonthEventDisplayMode displayMode;
+
   final ValueChanged<DateTime> onSelect;
   final ValueChanged<Topic> onPeriodEventTap;
+
+  /// この幅以下では連続バーが読めなくなるため旧ピル表示へフォールバックする。
+  static const double _narrowWidthThreshold = 320;
+
+  /// 同時に表示するバーのレーン数上限。 超過分は行単位の「+N 件」に集約。
+  static const int _maxVisibleLanes = 3;
 
   int get _leadingBlankCount => month.weekday % 7;
 
@@ -717,34 +775,95 @@ class _MonthGrid extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        children: [
-          const _WeekHeaderRow(),
-          // 行は使える縦スペースを均等に分け合う。 セルは縦に伸びるが
-          // 予定が多いと枠内 ListView でスクロール可能。
-          Expanded(
-            child: Column(
-              children: [
-                for (var r = 0; r < rows; r++)
-                  Expanded(
-                    child: Row(
-                      children: [
-                        for (var c = 0; c < 7; c++)
-                          Expanded(
-                            child: _cellAt(r * 7 + c, blanks, days),
-                          ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final effectiveMode = (displayMode == MonthEventDisplayMode.bar &&
+                  constraints.maxWidth > _narrowWidthThreshold)
+              ? MonthEventDisplayMode.bar
+              : MonthEventDisplayMode.legacyPill;
+          return Column(
+            children: [
+              const _WeekHeaderRow(),
+              // 行は使える縦スペースを均等に分け合う。 セルは縦に伸びるが
+              // 予定が多いと枠内 ListView でスクロール可能。
+              Expanded(
+                child: effectiveMode == MonthEventDisplayMode.bar
+                    ? _buildBarRows(blanks, days, rows)
+                    : _buildLegacyRows(blanks, days, rows),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _cellAt(int index, int blanks, int days) {
+  /// 旧表示 (従来の日毎ピル)。 320px 以下のフォールバック先も兼ねる。
+  Widget _buildLegacyRows(int blanks, int days, int rows) {
+    return Column(
+      children: [
+        for (var r = 0; r < rows; r++)
+          Expanded(
+            child: Row(
+              children: [
+                for (var c = 0; c < 7; c++)
+                  Expanded(
+                    child: _cellAt(r * 7 + c, blanks, days),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// 連続バー表示。 週行ごとに Stack で背景セル + 期間予定バーを重ねる。
+  Widget _buildBarRows(int blanks, int days, int rows) {
+    // 月グリッドの全セルの実日付範囲 (前月/翌月の空白セル込み) と重なる
+    // 期間予定だけをレーン割当の対象にする。
+    final displayStart = DateTime(month.year, month.month, 1 - blanks);
+    final displayEnd =
+        DateTime(month.year, month.month, 1 - blanks + rows * 7 - 1);
+    final visibleEvents = periodEvents
+        .where((t) =>
+            !dateOnly(t.endTime!).isBefore(displayStart) &&
+            !dateOnly(t.startTime!).isAfter(displayEnd))
+        .toList(growable: false);
+    final laneByTopicId = assignGlobalLanes(visibleEvents);
+
+    return Column(
+      children: [
+        for (var r = 0; r < rows; r++)
+          Expanded(
+            child: _WeekRow(
+              rowBars: computeRowBars(
+                rowStart:
+                    DateTime(month.year, month.month, 1 - blanks + r * 7),
+                periodEvents: visibleEvents,
+                laneByTopicId: laneByTopicId,
+                maxVisibleLanes: _maxVisibleLanes,
+              ),
+              onPeriodEventTap: onPeriodEventTap,
+              cellBuilder: (col, topReserved) => _cellAt(
+                r * 7 + col,
+                blanks,
+                days,
+                hidePeriodPills: true,
+                topReserved: topReserved,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _cellAt(
+    int index,
+    int blanks,
+    int days, {
+    bool hidePeriodPills = false,
+    double topReserved = 0,
+  }) {
     final dayNumber = index - blanks + 1;
     if (dayNumber < 1 || dayNumber > days) {
       return const _EmptyDayCell();
@@ -758,11 +877,157 @@ class _MonthGrid extends StatelessWidget {
       topics: topics,
       onTap: () => onSelect(date),
       onPeriodEventTap: onPeriodEventTap,
+      hidePeriodPills: hidePeriodPills,
+      topReserved: topReserved,
     );
   }
 
   static bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+/// 連続バー表示時の 1 週行。
+/// 背景に日付セル (期間予定ピルなし)、 前面に期間予定バーを Positioned で重ねる。
+class _WeekRow extends StatelessWidget {
+  const _WeekRow({
+    required this.rowBars,
+    required this.cellBuilder,
+    required this.onPeriodEventTap,
+  });
+
+  final WeekRowBars rowBars;
+
+  /// 列番号 (0-6) と バー領域の予約高さ を受けてセルを組むビルダー。
+  final Widget Function(int col, double topReserved) cellBuilder;
+  final ValueChanged<Topic> onPeriodEventTap;
+
+  /// バー 1 本の高さ。 既存ピル (14px) よりやや大きくし視認性を確保。
+  static const double barHeight = 18;
+
+  /// バー同士の縦間隔。
+  static const double barGap = 3;
+
+  /// _DayCell の日付バッジ領域の実測高さ
+  /// (outer padding top 2 + バッジ 22 + gap 2)。 _DayCell 側と同期を保つこと。
+  static const double dateBadgeAreaHeight = 26;
+
+  /// 行単位オーバーフロー「+N 件」ラベルの高さ (_DayCell._overflowRowHeight と同値)。
+  static const double overflowLabelHeight = 13;
+
+  /// この行でバー領域として確保する高さ (セル内のスポット予定を下へ押し出す)。
+  double get reservedBarsHeight {
+    final lanes = rowBars.laneCount;
+    final overflow = rowBars.hiddenCount > 0 ? overflowLabelHeight : 0.0;
+    return lanes * (barHeight + barGap) + overflow;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reserved = reservedBarsHeight;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final colWidth = constraints.maxWidth / 7;
+        return Stack(
+          clipBehavior: Clip.hardEdge,
+          children: [
+            Positioned.fill(
+              child: Row(
+                children: [
+                  for (var c = 0; c < 7; c++)
+                    Expanded(child: cellBuilder(c, reserved)),
+                ],
+              ),
+            ),
+            for (final seg in rowBars.visible)
+              Positioned(
+                // 行の端から続く / 続いていく側は端まで伸ばして連続感を出す。
+                left: seg.startCol * colWidth + (seg.continuesBefore ? 0 : 2),
+                width: (seg.endCol - seg.startCol + 1) * colWidth -
+                    (seg.continuesBefore ? 0 : 2) -
+                    (seg.continuesAfter ? 0 : 2),
+                top: dateBadgeAreaHeight + seg.lane * (barHeight + barGap),
+                height: barHeight,
+                child: _PeriodBar(
+                  segment: seg,
+                  onTap: () => onPeriodEventTap(seg.topic),
+                ),
+              ),
+            if (rowBars.hiddenCount > 0)
+              Positioned(
+                left: 6,
+                top: dateBadgeAreaHeight +
+                    rowBars.laneCount * (barHeight + barGap),
+                height: overflowLabelHeight,
+                child: Text(
+                  '+${rowBars.hiddenCount} 件',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    color: AppColors.softGray,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// 期間予定の連続バー 1 本。
+/// 行の端から続く側の角丸を潰して継続を示す (Google Calendar 同様)。
+class _PeriodBar extends StatelessWidget {
+  const _PeriodBar({required this.segment, required this.onTap});
+
+  final MonthBarSegment segment;
+  final VoidCallback onTap;
+
+  String get _semanticsLabel {
+    final t = segment.topic;
+    final s = t.startTime!;
+    final e = t.endTime!;
+    return '期間予定 ${t.title}、${s.month}月${s.day}日から${e.month}月${e.day}日まで';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = Radius.circular(4);
+    final borderRadius = BorderRadius.horizontal(
+      left: segment.continuesBefore ? Radius.zero : radius,
+      right: segment.continuesAfter ? Radius.zero : radius,
+    );
+    return Semantics(
+      button: true,
+      label: _semanticsLabel,
+      child: Material(
+        color: segment.topic.displayColor,
+        borderRadius: borderRadius,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: borderRadius,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ExcludeSemantics(
+                child: Text(
+                  segment.topic.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _WeekHeaderRow extends StatelessWidget {
@@ -815,6 +1080,8 @@ class _DayCell extends StatelessWidget {
     required this.topics,
     required this.onTap,
     required this.onPeriodEventTap,
+    this.hidePeriodPills = false,
+    this.topReserved = 0,
   });
 
   final DateTime date;
@@ -822,6 +1089,13 @@ class _DayCell extends StatelessWidget {
   final List<Topic> topics;
   final VoidCallback onTap;
   final ValueChanged<Topic> onPeriodEventTap;
+
+  /// 連続バー表示時 true。 期間予定はバー側で描画するためセル内ピルから除外する。
+  final bool hidePeriodPills;
+
+  /// 連続バー表示時にバー領域として空ける上部の高さ。
+  /// スポット予定ピルはこの分だけ下から並び始める。
+  final double topReserved;
 
   // ピル / 「+N」 行の実測高さ (font 9 + padding + margin-bottom 1)。
   // フォントメトリクスが変わったら微調整。 余裕を持って整数で固定。
@@ -897,10 +1171,15 @@ class _DayCell extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               // 残りスペースに入る分だけピルを並べる。
+              // 連続バー表示時は topReserved 分を空けてバーとの重なりを防ぐ。
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    return _buildPillStack(constraints.maxHeight);
+                    return Padding(
+                      padding: EdgeInsets.only(top: topReserved),
+                      child:
+                          _buildPillStack(constraints.maxHeight - topReserved),
+                    );
                   },
                 ),
               ),
@@ -915,23 +1194,30 @@ class _DayCell extends StatelessWidget {
   /// - 全件入るなら overflow ラベルなし
   /// - 入りきらないなら overflow ラベル 1 行を確保し、 残り高さで本数決定
   Widget _buildPillStack(double availableHeight) {
-    if (topics.isEmpty || availableHeight <= 0) return const SizedBox.shrink();
+    // 連続バー表示時は期間予定を除外 (バーとして _WeekRow 側で描画済み)。
+    // _isPeriodEvent はこのクラス内で定義済みのヘルパー (Topic.isPeriodEvent と同判定)。
+    final pillTopics = hidePeriodPills
+        ? topics.where((t) => !_isPeriodEvent(t)).toList(growable: false)
+        : topics;
+    if (pillTopics.isEmpty || availableHeight <= 0) {
+      return const SizedBox.shrink();
+    }
     final fitAll = (availableHeight / _pillRowHeight).floor();
-    final canShowAll = fitAll >= topics.length;
+    final canShowAll = fitAll >= pillTopics.length;
     final int shownCount;
     final bool overflow;
     if (canShowAll) {
-      shownCount = topics.length;
+      shownCount = pillTopics.length;
       overflow = false;
     } else {
       // overflow 行 1 行ぶんを確保した残りで何件入るか再計算。
       final remaining = availableHeight - _overflowRowHeight;
       final fit = (remaining / _pillRowHeight).floor();
-      shownCount = fit.clamp(0, topics.length - 1);
+      shownCount = fit.clamp(0, pillTopics.length - 1);
       overflow = true;
     }
-    final visible = topics.take(shownCount);
-    final hiddenCount = topics.length - shownCount;
+    final visible = pillTopics.take(shownCount);
+    final hiddenCount = pillTopics.length - shownCount;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
