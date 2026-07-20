@@ -823,9 +823,10 @@ class _DayCell extends StatelessWidget {
   final VoidCallback onTap;
   final ValueChanged<Topic> onPeriodEventTap;
 
-  // ピル / 「+N」 行の実測高さ (font 9 + padding + margin-bottom 1)。
+  // ピル / 「+N」 行の実測高さ (font 9 + padding + 行間の余白)。
+  // 期間予定ピルは行間 3px を当たり判定に含めるため最大約 17.8px。
   // フォントメトリクスが変わったら微調整。 余裕を持って整数で固定。
-  static const double _pillRowHeight = 14;
+  static const double _pillRowHeight = 18;
   static const double _overflowRowHeight = 13;
   static final _timeFmt = DateFormat('HH:mm');
 
@@ -936,29 +937,40 @@ class _DayCell extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
+        // 期間予定ピルは独立 InkWell でタップを横取りし編集ダイアログを開く。
+        // 行間の余白を InkWell の内側に置き、 可視サイズを変えずに
+        // 当たり判定だけを下方向へ広げる (WCAG 2.5.5 対応の一環)。
+        // スポット予定は外側 InkWell (= 該当日の画面遷移) に任せる。
         for (final t in visible)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 1),
-            // 期間予定ピルは独立 InkWell でタップを横取りし削除確認。
-            // スポット予定は外側 InkWell (= 該当日の画面遷移) に任せる。
-            child: _isPeriodEvent(t)
-                ? Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () => onPeriodEventTap(t),
-                      child: _EventPill(
-                        topic: t,
-                        periodPosition: _periodPosition(t),
-                        timeFormat: _timeFmt,
+          _isPeriodEvent(t)
+              ? Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => onPeriodEventTap(t),
+                    mouseCursor: SystemMouseCursors.click,
+                    hoverColor: Colors.black.withValues(alpha: 0.08),
+                    child: Semantics(
+                      button: true,
+                      label: '${t.title} の期間予定を編集',
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 3),
+                        child: _EventPill(
+                          topic: t,
+                          periodPosition: _periodPosition(t),
+                          timeFormat: _timeFmt,
+                        ),
                       ),
                     ),
-                  )
-                : _EventPill(
+                  ),
+                )
+              : Padding(
+                  padding: const EdgeInsets.only(bottom: 1),
+                  child: _EventPill(
                     topic: t,
                     periodPosition: _periodPosition(t),
                     timeFormat: _timeFmt,
                   ),
-          ),
+                ),
         if (overflow)
           Text(
             '+$hiddenCount 件',
@@ -1008,7 +1020,7 @@ class _EventPill extends StatelessWidget {
         ? '${timeFormat.format(topic.startTime!)} '
         : '';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(3),
