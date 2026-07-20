@@ -341,6 +341,10 @@ class _PeriodEventEditDialogState
         colorHex: _toHex(_selectedColor),
         photos: ex.photos,
         trainTransfers: ex.trainTransfers,
+        actualStartTime: ex.actualStartTime,
+        actualEndTime: ex.actualEndTime,
+        actualStatus: ex.actualStatus,
+        actualNote: ex.actualNote,
         createdAt: ex.createdAt,
         updatedAt: DateTime.now(),
       );

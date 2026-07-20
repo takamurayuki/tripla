@@ -106,6 +106,13 @@ class DayRepository {
     );
   }
 
+  /// Day 振り返りメモを更新する。 null を渡すとクリアする。
+  Future<void> setNote(String id, String? note) async {
+    await (_db.update(_db.days)..where((d) => d.id.equals(id))).write(
+      DaysCompanion(note: Value(note)),
+    );
+  }
+
   Day _toEntity(DayRow row) {
     return Day(
       id: row.id,
