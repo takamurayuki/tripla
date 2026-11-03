@@ -1,7 +1,9 @@
-# 共通 Fastfile（Swift / React Native 用）
-# 前提: GitHub Secrets に ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_CONTENT_BASE64 を登録済み。
-# CI では workflow 側が .p8 を ~/private_keys/AuthKey_<KeyID>.p8 に配置するため、
-# xcodebuild の自動署名（-allowProvisioningUpdates）がそのまま使える。
+# tripla 専用 Fastfile（Flutter）
+# 中央共通版との違い: ビルド番号は increment_build_number を使わない。
+# Flutter プロジェクトでは CURRENT_PROJECT_VERSION が "$(FLUTTER_BUILD_NUMBER)" で、
+# 値は workflow 側の `flutter build ios --config-only --build-number` が
+# Generated.xcconfig に書き込む。increment_build_number は Apple Generic
+# Versioning 前提で tripla では失敗するため、lane から外している。
 require "base64"
 
 default_platform(:ios)
@@ -15,57 +17,11 @@ def asc_api_key
   )
 end
 
-# アプリの Bundle ID を特定する。
-# 優先順位: 環境変数 IOS_APP_IDENTIFIER → Xcode プロジェクト（Pods を除く）の
-# アプリターゲットの PRODUCT_BUNDLE_IDENTIFIER（ターゲットレベル→プロジェクトレベル）。
-def resolve_app_identifier
-  env_id = ENV["IOS_APP_IDENTIFIER"]
-  return env_id unless env_id.nil? || env_id.empty?
-
-  require "xcodeproj"
-  roots = [Dir.pwd, File.expand_path("..", __dir__), File.expand_path("../..", __dir__)].uniq
-  candidates = roots.flat_map do |root|
-    Dir[File.join(root, "*.xcodeproj")] + Dir[File.join(root, "ios/*.xcodeproj")] + Dir[File.join(root, "*/*.xcodeproj")]
-  end.uniq
-  path = candidates.reject { |p| p.include?("Pods") }.first
-  return nil if path.nil?
-
-  project = Xcodeproj::Project.open(path)
-  target = project.targets.find { |t| t.product_type == "com.apple.product-type.application" }
-  return nil if target.nil?
-
-  identifier = nil
-  target.build_configurations.each do |config|
-    value = config.build_settings["PRODUCT_BUNDLE_IDENTIFIER"]
-    identifier = value if value && !value.include?("$(")
-    break if identifier
-  end
-  if identifier.nil?
-    project.build_configurations.each do |config|
-      value = config.build_settings["PRODUCT_BUNDLE_IDENTIFIER"]
-      identifier = value if value && !value.include?("$(")
-      break if identifier
-    end
-  end
-  identifier
-end
-
 platform :ios do
-  desc "ビルドから TestFlight アップロードまで一括（Swift / React Native）"
+  desc "ビルドから TestFlight アップロードまで一括（Flutter）"
   lane :beta do
     api_key = asc_api_key
 
-    # ビルド番号は App Store Connect 上の最新 + 1（自動採番）
-    app_id = resolve_app_identifier
-    if app_id
-      latest = latest_testflight_build_number(api_key: api_key, app_identifier: app_id, initial_build_number: 0)
-      increment_build_number(build_number: latest + 1)
-    else
-      UI.important("app_identifier を特定できなかったため、ビルド番号に CI 実行番号を使います")
-      increment_build_number(build_number: ENV.fetch("GITHUB_RUN_NUMBER", "1").to_i)
-    end
-
-    # workflow 側の未指定は空文字で渡ってくるため、nil に正規化する
     workspace = ENV["IOS_WORKSPACE"]
     workspace = nil if workspace.nil? || workspace.empty?
     project = ENV["IOS_PROJECT"]
@@ -80,7 +36,7 @@ platform :ios do
 
     build_app(
       scheme: ENV.fetch("IOS_SCHEME"),
-      workspace: workspace, # 未指定なら project を使用
+      workspace: workspace,
       project: project,
       export_method: "app-store",
       xcargs: xcargs
@@ -88,18 +44,6 @@ platform :ios do
 
     upload_to_testflight(
       api_key: api_key,
-      skip_waiting_for_build_processing: true
-    )
-  end
-
-  desc "ビルド済みIPAだけを TestFlight へアップロード"
-  lane :upload_beta do |options|
-    api_key = asc_api_key
-    ipa = options[:ipa] || Dir["../build/ipa/*.ipa", "../ios/build/*.ipa"].first
-    UI.user_error!("IPA が見つかりません") unless ipa
-    upload_to_testflight(
-      api_key: api_key,
-      ipa: ipa,
       skip_waiting_for_build_processing: true
     )
   end
