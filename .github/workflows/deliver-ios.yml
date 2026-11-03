@@ -1,0 +1,15 @@
+# 呼び出し側: iOS / Flutter（tripla）
+# 配置先: tripla リポジトリの .github/workflows/deliver-ios.yml
+# あわせて ios/ExportOptions.plist（mobile-delivery/templates のもの）を配置済み。
+# 配信は手動実行のみ（push では送らない）
+name: Deliver iOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ios:
+    uses: takamurayuki/mobile-delivery/.github/workflows/ios-flutter.yml@v1
+    with:
+      flutter-version: "3.41.9"
+    secrets: inherit # ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_CONTENT_BASE64 が必要
