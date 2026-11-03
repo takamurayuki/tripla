@@ -9,7 +9,7 @@ on:
 
 jobs:
   ios:
-    uses: takamurayuki/mobile-delivery/.github/workflows/ios-flutter.yml@v2
+    uses: takamurayuki/mobile-delivery/.github/workflows/ios-flutter2.yml@main
     with:
       flutter-version: "3.41.9"
     secrets: inherit # ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_CONTENT_BASE64 が必要
