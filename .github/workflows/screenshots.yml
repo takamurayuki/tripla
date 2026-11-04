@@ -1,0 +1,92 @@
+name: Screenshots
+
+# テンプレート: Flutter アプリ用シミュレータ画面キャプチャ
+# 配置先: アプリ側リポジトリの .github/workflows/screenshots.yml
+# 置き換え箇所: 3.41.9 / jp.tripla.app
+# 注意: タップ操作なしの起動画面キャプチャが基本。画面遷移の検証は Maestro 併用を検討する。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+
+permissions:
+  contents: write
+
+jobs:
+  screenshots:
+    name: Capture UI screenshots (simulator)
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: 'stable'
+
+      - name: Build for simulator
+        run: |
+          flutter pub get
+          flutter build ios --simulator --debug
+
+      - name: Boot simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          for runtime, devices in data['devices'].items():
+              if 'iOS' not in runtime:
+                  continue
+              for d in devices:
+                  if d.get('isAvailable') and 'iPhone' in d['name']:
+                      print(d['udid'])
+                      sys.exit(0)
+          sys.exit(1)
+          ")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100 || true
+
+      - name: Install and capture
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          APP=$(find build/ios -name 'Runner.app' -type d | head -1)
+          echo "APP=$APP"
+          mkdir -p shots
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" jp.tripla.app
+          sleep 5
+          xcrun simctl io "$UDID" screenshot shots/01-launch.png
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots
+          if-no-files-found: ignore
+
+      - name: Publish to ci-screenshots branch
+        run: |
+          cp shots/*.png /tmp/ 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code origin ci-screenshots > /dev/null 2>&1; then
+            git fetch origin ci-screenshots
+            git switch -C ci-screenshots origin/ci-screenshots
+          else
+            git switch --orphan ci-screenshots
+            git rm -rf . > /dev/null 2>&1 || true
+          fi
+          mkdir -p latest
+          cp /tmp/*.png latest/
+          git add latest
+          git commit -m "Update UI screenshots (${GITHUB_SHA::7})" || echo "no changes"
+          git push origin ci-screenshots
