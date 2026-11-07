@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <clipPath id="body"><rect x="112" y="196" width="800" height="712" rx="56" ry="56"/></clipPath>
+  </defs>
+  <rect width="1024" height="1024" fill="#2DAEC0"/>
+  <rect x="112" y="196" width="800" height="712" rx="56" ry="56" fill="#FFFFFF"/>
+  <rect x="112" y="196" width="800" height="160" fill="#F4C430" clip-path="url(#body)"/>
+  <rect x="290" y="118" width="44" height="150" rx="22" ry="22" fill="#FFFFFF"/>
+  <rect x="690" y="118" width="44" height="150" rx="22" ry="22" fill="#FFFFFF"/>
+  <g transform="translate(532 592) rotate(45)" fill="#F0563F">
+    <!-- fuselage: elongated teardrop, nose y=-280, tail y=+268 -->
+    <path d="M0,-280 C24,-280 36,-252 36,-214 L36,150 C36,206 22,250 14,268 L-14,268 C-22,250 -36,206 -36,150 L-36,-214 C-36,-252 -24,-280 0,-280 Z"/>
+    <!-- main wings -->
+    <polygon points="30,-84 272,48 272,100 30,52"/>
+    <polygon points="-30,-84 -272,48 -272,100 -30,52"/>
+    <!-- tail wings -->
+    <polygon points="0,170 120,234 120,264 0,268"/>
+    <polygon points="0,170 -120,234 -120,264 0,268"/>
+  </g>
+</svg>
