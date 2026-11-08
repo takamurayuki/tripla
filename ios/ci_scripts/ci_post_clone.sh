@@ -8,6 +8,8 @@
 # 「Unable to load contents of file list: .../Pods-Runner-frameworks-Release-*.xcfilelist」で
 # アーカイブが失敗する。
 # - Flutter stable を取得し、flutter pub get で Generated.xcconfig を作る
+# - build_runner で Drift の生成コード（lib/**/*.g.dart、.gitignore 対象）を作る。
+#   無いと Xcode のビルド中の Dart コンパイルで database.g.dart が見つからず失敗する
 # - pod install で Pods/ と xcfilelist を作る
 # - ビルド番号は Xcode Cloud の通し番号（CI_BUILD_NUMBER）+ 100 を使う。pubspec.yaml の
 #   ビルド番号（+N）のままだと毎回同じ番号になり、TestFlight が
@@ -29,7 +31,7 @@
 #   13 Flutter の取得                  14 Swift Package Manager 連携をオフにする
 #   15 flutter precache               16 flutter pub get
 #   17 ビルド番号の設定                18 ios へ移動
-#   19 pod install
+#   19 pod install                    20 Drift の生成コードを作る（build_runner）
 #   ※ 17 のビルド番号は CI_BUILD_NUMBER + 100。GitHub配信時代の既存ビルド（〜12）との
 #     衝突回避のため +100 する。Xcode Cloud の通し番号に連動して単調増加する
 
@@ -72,6 +74,7 @@ export PATH="$HOME/flutter/bin:$PATH"
 step 14 "Swift Package Manager 連携をオフにする" flutter config --no-enable-swift-package-manager
 step 15 "flutter precache" flutter precache --ios
 step 16 "flutter pub get" flutter pub get
+step 20 "Drift の生成コードを作る（build_runner）" dart run build_runner build --delete-conflicting-outputs
 step 17 "ビルド番号の設定" set_build_number "$(expr "${CI_BUILD_NUMBER:-1}" + 100)"
 
 step 18 "ios へ移動" cd ios
